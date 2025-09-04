@@ -41,7 +41,7 @@ def detect_fire_from_camera(camera_index, location_name):
             filename = f"{save_path}{location_name.replace(' ', '_')}_fire_{frame_count}.jpg"
             cv2.imwrite(filename, img_with_boxes)
             print(f"🔥 Огонь! [{location_name}] Кадр сохранен: {filename}")
-            send_to_site(filename, location=location_name)
+            send_to_site(filename, location_name, conf)
 
         frame_count += 1
         cv2.imshow(f"Fire Detection - {location_name}", img_with_boxes)
@@ -56,9 +56,9 @@ def detect_fire_from_camera(camera_index, location_name):
 
 if __name__ == "__main__":
     cameras = [
-        (0, "Камера №1"),
-        (1, "Камера №2"),
-        # ("./fire1.mp4", "Запись с файла"),
+        #(0, "Камера №1"),
+        #(1, "Камера №2"),
+         ("./fire1.mp4", "Камера №3"),
     ]
 
     threads = []

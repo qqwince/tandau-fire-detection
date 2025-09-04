@@ -1,7 +1,7 @@
 import requests
 from datetime import datetime
 
-SITE_API_URL = "http://192.168.100.111:9999/api/fire/"  # адрес при локальной работе
+SITE_API_URL = "http://127.0.0.1:8000/api/fire/"  # адрес при локальной работе
 
 # можно заранее задать координаты камер:
 CAMERA_COORDINATES = {
@@ -10,7 +10,7 @@ CAMERA_COORDINATES = {
     "Камера №3": (56.8389, 60.6057),  # Екатеринбург
 }
 
-def send_to_site(image_path, location):
+def send_to_site(image_path, location, conf):
     now = datetime.now().isoformat()
     lat, lon = CAMERA_COORDINATES.get(location, (None, None))
 
@@ -24,6 +24,7 @@ def send_to_site(image_path, location):
         "description": f"Автоматическое обнаружение на {location}",
         "latitude": lat,
         "longitude": lon,
+        "conf": conf*100,
     }
 
     files = {

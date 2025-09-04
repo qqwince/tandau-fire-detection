@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import natureVideo from '@/assets/natureVideo.mp4'
+import { Link } from 'react-router-dom'
 
 function Landing() {
     const phrases = [
@@ -92,14 +93,15 @@ function Landing() {
                         </motion.h2>
                     </AnimatePresence>
                 </div>
-
-                <motion.button
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="mt-6 rounded-2xl bg-gradient-to-tr from-red-500 to-orange-800 px-10 py-4 text-2xl font-bold shadow-lg shadow-black/40 transition"
-                >
-                    Начать с нами!
-                </motion.button>
+                <Link to="/firesites">
+                    <motion.button
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="mt-6 rounded-2xl bg-gradient-to-tr from-red-500 to-orange-800 px-10 py-4 text-2xl font-bold shadow-lg shadow-black/40 transition"
+                    >
+                        Начать с нами!
+                    </motion.button>
+                </Link>
                 <h2>
                     Остались вопросы? Telegram -{' '}
                     <a
