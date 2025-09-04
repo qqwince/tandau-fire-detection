@@ -1,17 +1,47 @@
-import fireIcon from "@/assets/fireIcon.svg"
+import { Link } from 'react-router-dom'
 const Header = () => {
-  return (
-    <nav className="flex justify-around mt-6 items-center">
-      <img src={fireIcon} alt="Иконка" className="h-12 hover:cursor-pointer" />
-      <ul className="flex mx-12 gap-8">
-        <li><a className="hover:cursor-pointer text-gray-600 font-semibold">Главная</a></li>
-        <li><a className="hover:cursor-pointer text-gray-600 font-semibold">О нас</a></li>
-        <li><a className="hover:cursor-pointer text-gray-600 font-semibold">Контакты</a></li>
-        <li><a className="hover:cursor-pointer text-gray-600 font-semibold">Список пожаров</a></li>
-      </ul>
-      <h3 className="hover:cursor-pointer">Выйти</h3>
-    </nav>
-  );
-};
+    return (
+        <nav className="flex items-center justify-around py-8 shadow-xl/20">
+            <Link
+                to="/"
+                className="font-semibold text-gray-600 hover:text-gray-500"
+            >
+                Главная
+            </Link>
+            <ul className="mx-12 flex gap-8">
+                <li>
+                    <a
+                        href="mailto:qqwincest@gmail.com"
+                        className="font-semibold text-gray-600 hover:text-gray-500"
+                    >
+                        Контакты
+                    </a>
+                </li>
+                <li>
+                    <Link
+                        to="/firesites"
+                        className="font-semibold text-gray-600 hover:text-gray-500"
+                    >
+                        Список пожаров
+                    </Link>
+                </li>
+                <li>
+                    <Link
+                        to="/"
+                        className="font-semibold text-gray-600 hover:text-gray-500"
+                    >
+                        О нас
+                    </Link>
+                </li>
+            </ul>
+            {/*<a className="text-red-500  hover:text-red-400">*/}
+            {/*    Выйти*/}
+            {/*</a>*/}
+            <Link to="/login" className="hover:text-gray-500">
+                Войти
+            </Link>
+        </nav>
+    )
+}
 
-export default Header;
+export default Header

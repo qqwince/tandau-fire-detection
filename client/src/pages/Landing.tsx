@@ -18,7 +18,7 @@ function Landing() {
     const [index, setIndex] = useState(0)
     const [show, setShow] = useState(true)
     const [word, setWord] = useState('')
-    const completeWord = 'FIREBase'
+    const completeWord = 'Fire Detection System'
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -43,7 +43,7 @@ function Landing() {
     }, [show])
 
     return (
-        <section className="relative flex h-screen w-full items-center justify-center overflow-hidden">
+        <section className="relative flex h-[40vw] w-full items-center justify-center overflow-hidden">
             {/* Фон-видео */}
             <video
                 src={natureVideo}
@@ -51,14 +51,14 @@ function Landing() {
                 loop
                 muted
                 playsInline
-                className="absolute top-0 left-0 h-full w-full object-cover"
+                className="absolute top-0 left-0 h-[90vh] w-full object-cover"
             />
 
             {/* Полупрозрачный оверлей */}
             <div className="absolute inset-0 bg-black/50" />
 
             {/* Контент */}
-            <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center gap-6 p-6 text-white">
+            <div className="relative z-10 mx-auto my-12 flex max-w-4xl flex-col items-center gap-6 p-6 text-white">
                 <motion.h1
                     className="text-center text-6xl font-extrabold tracking-wide md:text-7xl"
                     initial={{ opacity: 0, y: -40 }}
@@ -77,27 +77,39 @@ function Landing() {
                     жизни людей, природу и имущество.
                 </p>
 
-                {/* Сменяющиеся слова */}
-                <AnimatePresence mode="wait">
-                    <motion.h2
-                        key={phrases[index]}
-                        className="text-3xl font-semibold text-yellow-300"
-                        initial={{ opacity: 0, y: 30 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -30 }}
-                        transition={{ duration: 0.6 }}
-                    >
-                        {phrases[index]}
-                    </motion.h2>
-                </AnimatePresence>
+                <div className="align-center justify-center text-center text-4xl font-bold">
+                    <h2>МЫ:</h2>
+                    <AnimatePresence mode="wait">
+                        <motion.h2
+                            key={phrases[index]}
+                            className="min-w-[250px] text-center text-3xl font-semibold"
+                            initial={{ opacity: 0, x: -150 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 150 }}
+                            transition={{ duration: 0.6 }}
+                        >
+                            {phrases[index]}
+                        </motion.h2>
+                    </AnimatePresence>
+                </div>
 
                 <motion.button
-                    whileHover={{ scale: 1.05 }}
+                    whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.95 }}
-                    className="mt-6 rounded-2xl bg-gradient-to-r from-red-500 to-orange-600 px-10 py-4 text-2xl font-bold shadow-lg shadow-black/40 transition"
+                    className="mt-6 rounded-2xl bg-gradient-to-tr from-red-500 to-orange-800 px-10 py-4 text-2xl font-bold shadow-lg shadow-black/40 transition"
                 >
                     Начать с нами!
                 </motion.button>
+                <h2>
+                    Остались вопросы? Telegram -{' '}
+                    <a
+                        href="https://t.me/qqwince"
+                        target="_blank"
+                        className="text-blue-400 hover:text-blue-500"
+                    >
+                        @qqwince
+                    </a>
+                </h2>
             </div>
         </section>
     )
