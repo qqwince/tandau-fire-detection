@@ -1,0 +1,23 @@
+{
+  "cameras": {
+    "Камера IP": {
+      "timeout": 7,
+      "step_seconds": 1,
+      "pause_seconds": 2,
+      "sweep_cycles": 0,
+      "onvif": {
+        "host": "192.168.100.60",
+        "port": 80,
+        "username": "admin",
+        "password": "Amirhan1181111811",
+        "pan_speed": 0.4,
+        "tilt_speed": 0.0,
+        "timeout": 1.0,
+        "max_left": -4.0,
+        "max_right": 4.0,
+        "max_up": 1.0,
+        "max_down": -1.0
+      }
+    }
+  }
+}

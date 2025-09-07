@@ -4,13 +4,14 @@ from ultralytics import YOLO
 import threading
 import time
 from site_sender import send_to_site, ensure_configuration_interactive
+from ptz import start_ptz_sweeper_if_configured
 
 # Настройки оптимизации
 CONFIG = {
     'skip_frames': True,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
     'reduce_quality': True,  # Включить/выключить понижение качества
     'quality_scale': 0.5,  # Масштаб качества (0.5 = 50% от оригинала)
-    'process_every_n_frames': 1,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
+    'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
     'detection_confidence': 0.8,  # Порог уверенности для детекции
 }
 
@@ -23,16 +24,43 @@ stop_all = False
 
 def detect_fire_from_camera(camera_index, location_name):
     global stop_all
-    cap = cv2.VideoCapture(camera_index)
+    def open_capture(src):
+        c = cv2.VideoCapture(src)
+        # Настройки таймаутов (если поддерживается сборкой OpenCV)
+        try:
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC
+            c.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 7000)
+        except Exception:
+            pass
+        try:
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC
+            c.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 7000)
+        except Exception:
+            pass
+        # Уменьшаем буфер
+        try:
+            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        return c
+
+    cap = open_capture(camera_index)
 
     if not cap.isOpened():
-        print(f"❌ {location_name} ({camera_index}) не доступна.")
-        return
+        print(f"⚠️ {location_name}: первая попытка подключения не удалась, пробую ещё раз...")
+        time.sleep(2)
+        cap.release()
+        cap = open_capture(camera_index)
+        if not cap.isOpened():
+            print(f"❌ {location_name} ({camera_index}) не доступна.")
+            return
 
     # Настройка буфера камеры для уменьшения задержки
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     print(f"✅ {location_name} запущена")
+    # Запускаем PTZ sweep, если есть конфиг для этой камеры
+    ptz_sweeper = start_ptz_sweeper_if_configured(location_name)
     print(f"   • Пропуск кадров: {'Да' if CONFIG['skip_frames'] else 'Нет'}")
     print(f"   • Понижение качества: {int(CONFIG['quality_scale'] * 100)}%" if CONFIG[
         'reduce_quality'] else "   • Понижение качества: Нет")
@@ -52,8 +80,14 @@ def detect_fire_from_camera(camera_index, location_name):
     while cap.isOpened() and not stop_all:
         ret, frame = cap.read()
         if not ret:
-            print(f"⚠️ Не удалось получить кадр с {location_name}")
-            break
+            print(f"⚠️ Потеря потока с {location_name}, переподключение...")
+            cap.release()
+            time.sleep(1)
+            cap = open_capture(camera_index)
+            if not cap.isOpened():
+                print(f"❌ Не удалось переподключиться к {location_name}")
+                break
+            continue
 
         frame_count += 1
 
@@ -184,6 +218,12 @@ def detect_fire_from_camera(camera_index, location_name):
             break
 
     cap.release()
+    # Останавливаем PTZ, если был запущен
+    try:
+        if 'ptz_sweeper' in locals() and ptz_sweeper is not None:
+            ptz_sweeper.stop()
+    except Exception:
+        pass
     cv2.destroyWindow(f"Fire Detection - {location_name}")
     print(f"📊 {location_name} - Обработано кадров: {processed_count}, Обнаружений: {detection_count}")
 
@@ -216,8 +256,8 @@ if __name__ == "__main__":
     cameras = [
         # (0, "Камера №1"),
         # (1, "Камера №2"),
-        ("./fire1.mp4", "Камера №3"),
-        # ("rtsp://admin:PASSWORD@IP:PORT/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
+        #("./fire1.mp4", "Камера №3"),
+        ("rtsp://admin:Amirhan1181111811@192.168.100.60:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
     ]
 
     threads = []
