@@ -6,8 +6,17 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.core.paginator import Paginator
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
-from .models import Fire
-from .serializers import FireSerializer, UserRegistrationSerializer, UserLoginSerializer, UserSerializer
+from django.utils.crypto import get_random_string
+from .models import Fire, Session, Membership, JoinRequest
+from .serializers import (
+    FireSerializer,
+    UserRegistrationSerializer,
+    UserLoginSerializer,
+    UserSerializer,
+    SessionSerializer,
+    MembershipSerializer,
+    JoinRequestSerializer,
+)
 
 
 class FirePagination(PageNumberPagination):
@@ -71,7 +80,17 @@ def get_user_profile(request):
 
 @api_view(['POST'])
 def receive_fire(request):
-    serializer = FireSerializer(data=request.data)
+    # Разрешаем передавать либо числовой session (id), либо join_code
+    data = request.data.copy()
+    join_code = data.get('join_code') or data.get('session_code') or data.get('session_join_code')
+    if join_code and not data.get('session'):
+        try:
+            session = Session.objects.get(join_code=join_code)
+            data['session'] = session.id
+        except Session.DoesNotExist:
+            return Response({'error': 'Session with provided join_code not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = FireSerializer(data=data)
     if serializer.is_valid():
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -92,8 +111,16 @@ def list_fires(request):
     sort_field = request.GET.get('sort_field', 'time')
     sort_order = request.GET.get('sort_order', 'desc')
     
+    # Фильтр по сессии (если указан session_id)
+    session_id = request.GET.get('session_id')
+
     # Базовый запрос
     fires = Fire.objects.all()
+    if session_id:
+        try:
+            fires = fires.filter(session_id=int(session_id))
+        except ValueError:
+            pass
     
     # Применяем фильтры
     if location:
@@ -153,3 +180,133 @@ def map_fires(request):
         for fire in fires
     ]
     return Response(fire_data, status=status.HTTP_200_OK)
+
+
+# ---------------- SESSIONS & MEMBERSHIPS ----------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_session(request):
+    name = request.data.get('name')
+    if not name:
+        return Response({'error': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    join_code = get_random_string(8)
+    session = Session.objects.create(name=name, owner=request.user, join_code=join_code)
+    # Owner becomes admin member
+    Membership.objects.create(user=request.user, session=session, role='admin', is_active=True)
+    return Response(SessionSerializer(session).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_sessions(request):
+    memberships = Membership.objects.filter(user=request.user, is_active=True).select_related('session')
+    sessions = [m.session for m in memberships]
+    return Response(SessionSerializer(sessions, many=True).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def request_join_by_code(request):
+    code = request.data.get('join_code')
+    if not code:
+        return Response({'error': 'join_code is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        session = Session.objects.get(join_code=code)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Check if blocked
+    blocked = JoinRequest.objects.filter(session=session, requester=request.user, status='blocked').exists()
+    if blocked:
+        return Response({'error': 'You are blocked from this session'}, status=status.HTTP_403_FORBIDDEN)
+
+    jr, created = JoinRequest.objects.get_or_create(session=session, requester=request.user)
+    if not created and jr.status == 'denied':
+        jr.status = 'pending'
+        jr.save(update_fields=['status'])
+
+    return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def pending_requests_for_session(request, session_id: int):
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Only owner or admin can view
+    is_admin = (
+        session.owner_id == request.user.id or
+        Membership.objects.filter(user=request.user, session=session, role='admin', is_active=True).exists()
+    )
+    if not is_admin:
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    requests_qs = JoinRequest.objects.filter(session=session, status='pending').select_related('requester')
+    return Response(JoinRequestSerializer(requests_qs, many=True).data, status=status.HTTP_200_OK)
+
+
+def _ensure_admin(user: User, session: Session) -> bool:
+    return (
+        session.owner_id == user.id or
+        Membership.objects.filter(user=user, session=session, role='admin', is_active=True).exists()
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def approve_request(request, request_id: int):
+    try:
+        jr = JoinRequest.objects.select_related('session', 'requester').get(id=request_id)
+    except JoinRequest.DoesNotExist:
+        return Response({'error': 'Request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin(request.user, jr.session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    jr.status = 'approved'
+    jr.save(update_fields=['status'])
+    Membership.objects.get_or_create(user=jr.requester, session=jr.session, defaults={'role': 'member', 'is_active': True})
+    return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def deny_request(request, request_id: int):
+    try:
+        jr = JoinRequest.objects.select_related('session').get(id=request_id)
+    except JoinRequest.DoesNotExist:
+        return Response({'error': 'Request not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin(request.user, jr.session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    jr.status = 'denied'
+    jr.save(update_fields=['status'])
+    return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def block_requester(request, session_id: int, user_id: int):
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin(request.user, session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    jr, _ = JoinRequest.objects.get_or_create(session=session, requester_id=user_id)
+    jr.status = 'blocked'
+    jr.save(update_fields=['status'])
+
+    # Optionally deactivate membership
+    Membership.objects.filter(user_id=user_id, session=session).update(is_active=False)
+
+    return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)

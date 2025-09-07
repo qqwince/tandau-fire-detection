@@ -4,6 +4,17 @@ export const $host = axios.create({
     baseURL: import.meta.env.VITE_API_URL, // подтягивает из .env
 })
 
+// Перехватчик запроса: всегда добавляем актуальный токен из localStorage
+$host.interceptors.request.use((config) => {
+    const tokenFromStorage = localStorage.getItem('access_token')
+    if (tokenFromStorage) {
+        // Если заголовок ещё не установлен или нужно обновить — ставим из хранилища
+        config.headers = config.headers ?? {}
+        ;(config.headers as any).Authorization = `Bearer ${tokenFromStorage}`
+    }
+    return config
+})
+
 // Перехватчик для автоматического обновления токенов
 $host.interceptors.response.use(
     (response) => response,
@@ -22,8 +33,12 @@ $host.interceptors.response.use(
                     
                     const newAccessToken = response.data.access
                     localStorage.setItem('access_token', newAccessToken)
-                    
+
+                    // Обновляем заголовок по умолчанию для всех будущих запросов
+                    $host.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`
+
                     // Повторяем оригинальный запрос с новым токеном
+                    originalRequest.headers = originalRequest.headers ?? {}
                     originalRequest.headers.Authorization = `Bearer ${newAccessToken}`
                     return $host(originalRequest)
                 } catch (refreshError) {

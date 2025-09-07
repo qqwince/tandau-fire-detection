@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { fetchFireSites, type PaginationParams, type PaginatedResponse } from '../http/fireSites.ts'
+import { useAuth } from '../contexts/AuthContext.tsx'
+import { createSession, getMySessions, requestJoinByCode, type Session, getPendingRequests, approveRequest as approveRequestApi, denyRequest as denyRequestApi, blockRequester as blockRequesterApi, type JoinRequest } from '../http/auth.ts'
 
 interface FireSite {
     id: string
@@ -29,8 +31,16 @@ interface ImagePosition {
 }
 
 const FireList = () => {
+    const { isAuthenticated } = useAuth()
     const [sites, setSites] = useState<FireSite[]>([])
     const [loading, setLoading] = useState(true)
+    const [sessions, setSessions] = useState<Session[]>([])
+    const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
+    const [newSessionName, setNewSessionName] = useState('')
+    const [joinCode, setJoinCode] = useState('')
+    const [joinMessage, setJoinMessage] = useState<string | null>(null)
+    const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([])
+    const [showAdminPanel, setShowAdminPanel] = useState(false)
     const [selectedImage, setSelectedImage] = useState<string | null>(null)
     const [imageScale, setImageScale] = useState(1)
     const [imagePosition, setImagePosition] = useState<ImagePosition>({
@@ -65,7 +75,24 @@ const FireList = () => {
 
     useEffect(() => {
         loadSites()
-    }, [filters, pagination.currentPage, pagination.pageSize])
+    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            loadSessions()
+        } else {
+            setSessions([])
+            setActiveSessionId(null)
+        }
+    }, [isAuthenticated])
+
+    useEffect(() => {
+        if (isAuthenticated && activeSessionId && showAdminPanel) {
+            loadPendingRequests(activeSessionId)
+        } else {
+            setPendingRequests([])
+        }
+    }, [isAuthenticated, activeSessionId, showAdminPanel])
 
     // Keyboard and mouse event handlers for image modal
     useEffect(() => {
@@ -153,6 +180,7 @@ const FireList = () => {
                 conf_min: filters.confMin,
                 conf_max: filters.confMax,
             }
+            if (activeSessionId) params.session_id = activeSessionId
             
             // Добавляем фильтр по локации если выбраны конкретные локации
             if (filters.selectedLocations.length > 0) {
@@ -176,6 +204,78 @@ const FireList = () => {
             setSites([])
         } finally {
             setLoading(false)
+        }
+    }
+
+    const loadSessions = async () => {
+        try {
+            const list = await getMySessions()
+            setSessions(list)
+            if (!activeSessionId && list.length > 0) {
+                setActiveSessionId(list[0].id)
+            }
+        } catch (e) {
+            console.error('Ошибка загрузки сессий:', e)
+        }
+    }
+
+    const loadPendingRequests = async (sessionId: number) => {
+        try {
+            const reqs = await getPendingRequests(sessionId)
+            setPendingRequests(reqs)
+        } catch (e) {
+            console.error('Ошибка загрузки заявок:', e)
+        }
+    }
+
+    const handleCreateSession = async () => {
+        if (!newSessionName.trim()) return
+        try {
+            const s = await createSession(newSessionName.trim())
+            setSessions(prev => [s, ...prev])
+            setActiveSessionId(s.id)
+            setNewSessionName('')
+        } catch (e) {
+            console.error('Ошибка создания сессии:', e)
+        }
+    }
+
+    const handleJoinByCode = async () => {
+        if (!joinCode.trim()) return
+        try {
+            const jr = await requestJoinByCode(joinCode.trim())
+            setJoinMessage(jr.status === 'pending' ? 'Заявка отправлена' : `Статус: ${jr.status}`)
+            setJoinCode('')
+        } catch (e: any) {
+            setJoinMessage(e?.response?.data?.error || 'Ошибка отправки заявки')
+        }
+    }
+
+    const approveRequest = async (id: number) => {
+        try {
+            await approveRequestApi(id)
+            if (activeSessionId) loadPendingRequests(activeSessionId)
+        } catch (e) {
+            console.error('Ошибка утверждения:', e)
+        }
+    }
+
+    const denyRequest = async (id: number) => {
+        try {
+            await denyRequestApi(id)
+            if (activeSessionId) loadPendingRequests(activeSessionId)
+        } catch (e) {
+            console.error('Ошибка отклонения:', e)
+        }
+    }
+
+    const blockRequester = async (userId: number) => {
+        try {
+            if (!activeSessionId) return
+            await blockRequesterApi(activeSessionId, userId)
+            loadPendingRequests(activeSessionId)
+        } catch (e) {
+            console.error('Ошибка блокировки:', e)
         }
     }
 
@@ -472,6 +572,79 @@ const FireList = () => {
 
             <div className="animate-fade-in mt-[60px] flex justify-center px-4">
                 <section className="w-full max-w-7xl">
+                    {isAuthenticated && (
+                        <div className="animate-scale-in mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                                <div className="flex-1">
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Текущая сессия</label>
+                                    <div className="flex gap-3">
+                                        <select
+                                            value={activeSessionId ?? ''}
+                                            onChange={(e) => setActiveSessionId(e.target.value ? Number(e.target.value) : null)}
+                                            className="w-72 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
+                                        >
+                                            <option value="">Все сессии</option>
+                                            {sessions.map(s => (
+                                                <option key={s.id} value={s.id}>{s.name} — код: {s.join_code}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={() => setShowAdminPanel(v => !v)}
+                                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+                                        >
+                                            {showAdminPanel ? 'Скрыть заявки' : 'Заявки'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Создать сессию</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            value={newSessionName}
+                                            onChange={(e) => setNewSessionName(e.target.value)}
+                                            placeholder="Название"
+                                            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
+                                        />
+                                        <button onClick={handleCreateSession} className="rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700">Создать</button>
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Присоединиться по коду</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            value={joinCode}
+                                            onChange={(e) => setJoinCode(e.target.value)}
+                                            placeholder="Код приглашения"
+                                            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
+                                        />
+                                        <button onClick={handleJoinByCode} className="rounded-lg bg-gray-800 px-4 py-2 font-medium text-white hover:bg-gray-900">Отправить</button>
+                                    </div>
+                                    {joinMessage && <p className="mt-2 text-sm text-gray-600">{joinMessage}</p>}
+                                </div>
+                            </div>
+                            {showAdminPanel && activeSessionId && (
+                                <div className="mt-6 rounded-lg border border-gray-200 p-4">
+                                    <div className="mb-3 text-sm font-semibold text-gray-800">Ожидающие заявки</div>
+                                    {pendingRequests.length === 0 ? (
+                                        <p className="text-sm text-gray-500">Нет заявок</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {pendingRequests.map((r) => (
+                                                <div key={r.id} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2">
+                                                    <div className="text-sm">{r.requester_username}</div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => approveRequest(r.id)} className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700">Принять</button>
+                                                        <button onClick={() => denyRequest(r.id)} className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700">Отклонить</button>
+                                                        <button onClick={() => blockRequester(r.requester)} className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700">Заблокировать</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div className="animate-slide-up mb-8 text-center">
                         <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold text-transparent">
                             🔥 Мониторинг пожаров

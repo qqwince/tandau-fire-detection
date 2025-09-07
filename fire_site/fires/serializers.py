@@ -1,12 +1,39 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from .models import Fire
+from .models import Fire, Session, Membership, JoinRequest
 
 class FireSerializer(serializers.ModelSerializer):
     class Meta:
         model = Fire
         fields = '__all__'
+
+
+class SessionSerializer(serializers.ModelSerializer):
+    owner_username = serializers.ReadOnlyField(source='owner.username')
+
+    class Meta:
+        model = Session
+        fields = ('id', 'name', 'owner', 'owner_username', 'join_code', 'created_at')
+        read_only_fields = ('owner', 'join_code', 'created_at')
+
+
+class MembershipSerializer(serializers.ModelSerializer):
+    username = serializers.ReadOnlyField(source='user.username')
+
+    class Meta:
+        model = Membership
+        fields = ('id', 'user', 'username', 'session', 'role', 'is_active', 'created_at')
+        read_only_fields = ('user', 'is_active', 'created_at')
+
+
+class JoinRequestSerializer(serializers.ModelSerializer):
+    requester_username = serializers.ReadOnlyField(source='requester.username')
+
+    class Meta:
+        model = JoinRequest
+        fields = ('id', 'session', 'requester', 'requester_username', 'status', 'created_at', 'updated_at')
+        read_only_fields = ('requester', 'status', 'created_at', 'updated_at')
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)

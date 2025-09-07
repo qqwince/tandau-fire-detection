@@ -8,6 +8,7 @@ export interface PaginationParams {
     conf_max?: number
     sort_field?: 'time' | 'conf'
     sort_order?: 'asc' | 'desc'
+    session_id?: number
 }
 
 export interface PaginatedResponse<T> {
@@ -33,6 +34,7 @@ export const fetchFireSites = async (params: PaginationParams = {}) => {
     if (params.conf_max !== undefined) queryParams.append('conf_max', params.conf_max.toString())
     if (params.sort_field) queryParams.append('sort_field', params.sort_field)
     if (params.sort_order) queryParams.append('sort_order', params.sort_order)
+    if (params.session_id !== undefined) queryParams.append('session_id', params.session_id.toString())
     
     const url = `/api/fires/${queryParams.toString() ? '?' + queryParams.toString() : ''}`
     const { data } = await $host.get(url)

@@ -52,6 +52,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         try {
             const response = await refreshToken(storedRefreshToken)
             localStorage.setItem('access_token', response.access)
+            // Обновляем заголовок по умолчанию для axios
+            const $host = (window as any).$host
+            if ($host) {
+                $host.defaults.headers.common['Authorization'] = `Bearer ${response.access}`
+            }
         } catch (error) {
             console.error('Token refresh failed:', error)
             logout()

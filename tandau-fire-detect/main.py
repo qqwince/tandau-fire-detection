@@ -214,7 +214,7 @@ if __name__ == "__main__":
         # (0, "Камера №1"),
         # (1, "Камера №2"),
         ("./fire1.mp4", "Камера №3"),
-        # ("rtsp://admin:Amirhan1181111811@192.168.100.59:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
+        # ("rtsp://admin:PASSWORD@IP:PORT/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
     ]
 
     threads = []
