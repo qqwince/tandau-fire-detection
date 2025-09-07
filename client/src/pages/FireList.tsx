@@ -1,7 +1,21 @@
 import { useEffect, useState, useRef } from 'react'
-import { fetchFireSites, type PaginationParams, type PaginatedResponse } from '../http/fireSites.ts'
+import {
+    fetchFireSites,
+    type PaginationParams,
+    type PaginatedResponse,
+} from '../http/fireSites.ts'
 import { useAuth } from '../contexts/AuthContext.tsx'
-import { createSession, getMySessions, requestJoinByCode, type Session, getPendingRequests, approveRequest as approveRequestApi, denyRequest as denyRequestApi, blockRequester as blockRequesterApi, type JoinRequest } from '../http/auth.ts'
+import {
+    createSession,
+    getMySessions,
+    requestJoinByCode,
+    type Session,
+    getPendingRequests,
+    approveRequest as approveRequestApi,
+    denyRequest as denyRequestApi,
+    blockRequester as blockRequesterApi,
+    type JoinRequest,
+} from '../http/auth.ts'
 
 interface FireSite {
     id: string
@@ -62,7 +76,7 @@ const FireList = () => {
         confMin: 30,
         confMax: 100,
     })
-    
+
     // Состояние пагинации
     const [pagination, setPagination] = useState({
         currentPage: 1,
@@ -171,7 +185,7 @@ const FireList = () => {
     const loadSites = async () => {
         try {
             setLoading(true)
-            
+
             const params: PaginationParams = {
                 page: pagination.currentPage,
                 page_size: pagination.pageSize,
@@ -181,18 +195,19 @@ const FireList = () => {
                 conf_max: filters.confMax,
             }
             if (activeSessionId) params.session_id = activeSessionId
-            
+
             // Добавляем фильтр по локации если выбраны конкретные локации
             if (filters.selectedLocations.length > 0) {
                 // Для множественного выбора локаций используем первую выбранную
                 // В будущем можно расширить API для поддержки массива локаций
                 params.location = filters.selectedLocations[0]
             }
-            
-            const data: PaginatedResponse<FireSite> = await fetchFireSites(params)
-            
+
+            const data: PaginatedResponse<FireSite> =
+                await fetchFireSites(params)
+
             setSites(data.results || [])
-            setPagination(prev => ({
+            setPagination((prev) => ({
                 ...prev,
                 totalPages: data.total_pages,
                 totalCount: data.count,
@@ -232,7 +247,7 @@ const FireList = () => {
         if (!newSessionName.trim()) return
         try {
             const s = await createSession(newSessionName.trim())
-            setSessions(prev => [s, ...prev])
+            setSessions((prev) => [s, ...prev])
             setActiveSessionId(s.id)
             setNewSessionName('')
         } catch (e) {
@@ -244,7 +259,11 @@ const FireList = () => {
         if (!joinCode.trim()) return
         try {
             const jr = await requestJoinByCode(joinCode.trim())
-            setJoinMessage(jr.status === 'pending' ? 'Заявка отправлена' : `Статус: ${jr.status}`)
+            setJoinMessage(
+                jr.status === 'pending'
+                    ? 'Заявка отправлена'
+                    : `Статус: ${jr.status}`
+            )
             setJoinCode('')
         } catch (e: any) {
             setJoinMessage(e?.response?.data?.error || 'Ошибка отправки заявки')
@@ -282,7 +301,7 @@ const FireList = () => {
     const updateFilters = (updates: Partial<Filters>) => {
         setFilters((prev) => ({ ...prev, ...updates }))
         // Сбрасываем пагинацию при изменении фильтров
-        setPagination(prev => ({ ...prev, currentPage: 1 }))
+        setPagination((prev) => ({ ...prev, currentPage: 1 }))
     }
 
     const toggleLocation = (location: string) => {
@@ -296,7 +315,7 @@ const FireList = () => {
     // Функции для управления пагинацией
     const goToPage = (page: number) => {
         if (page >= 1 && page <= pagination.totalPages) {
-            setPagination(prev => ({ ...prev, currentPage: page }))
+            setPagination((prev) => ({ ...prev, currentPage: page }))
         }
     }
 
@@ -313,10 +332,10 @@ const FireList = () => {
     }
 
     const changePageSize = (newPageSize: number) => {
-        setPagination(prev => ({ 
-            ...prev, 
+        setPagination((prev) => ({
+            ...prev,
             pageSize: newPageSize,
-            currentPage: 1 // Сбрасываем на первую страницу при изменении размера
+            currentPage: 1, // Сбрасываем на первую страницу при изменении размера
         }))
     }
 
@@ -401,7 +420,6 @@ const FireList = () => {
             setDragStart({ x: event.clientX, y: event.clientY })
         }
     }
-
 
     if (loading) {
         return (
@@ -529,11 +547,13 @@ const FireList = () => {
                 }
 
                 .draggable-cursor {
-                    cursor: ${imageScale > 1
-                        ? isDragging
-                            ? 'grabbing'
-                            : 'grab'
-                        : 'default'};
+                    cursor: ${
+                        imageScale > 1
+                            ? isDragging
+                                ? 'grabbing'
+                                : 'grab'
+                            : 'default'
+                    };
                 }
 
                 .controls-fade {
@@ -541,9 +561,9 @@ const FireList = () => {
                         opacity 0.3s ease-in-out,
                         transform 0.3s ease-in-out;
                     opacity: ${showControls ? '1' : '0'};
-                    transform: ${showControls
-                        ? 'translateY(0)'
-                        : 'translateY(-10px)'};
+                    transform: ${
+                        showControls ? 'translateY(0)' : 'translateY(-10px)'
+                    };
                     pointer-events: ${showControls ? 'auto' : 'none'};
                 }
 
@@ -576,66 +596,141 @@ const FireList = () => {
                         <div className="animate-scale-in mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
                             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                                 <div className="flex-1">
-                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Текущая сессия</label>
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">
+                                        Текущая сессия
+                                    </label>
                                     <div className="flex gap-3">
                                         <select
                                             value={activeSessionId ?? ''}
-                                            onChange={(e) => setActiveSessionId(e.target.value ? Number(e.target.value) : null)}
+                                            onChange={(e) =>
+                                                setActiveSessionId(
+                                                    e.target.value
+                                                        ? Number(e.target.value)
+                                                        : null
+                                                )
+                                            }
                                             className="w-72 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
                                         >
                                             <option value="">Все сессии</option>
-                                            {sessions.map(s => (
-                                                <option key={s.id} value={s.id}>{s.name} — код: {s.join_code}</option>
+                                            {sessions.map((s) => (
+                                                <option key={s.id} value={s.id}>
+                                                    {s.name} — код:{' '}
+                                                    {s.join_code}
+                                                </option>
                                             ))}
                                         </select>
                                         <button
-                                            onClick={() => setShowAdminPanel(v => !v)}
+                                            onClick={() =>
+                                                setShowAdminPanel((v) => !v)
+                                            }
                                             className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
                                         >
-                                            {showAdminPanel ? 'Скрыть заявки' : 'Заявки'}
+                                            {showAdminPanel
+                                                ? 'Скрыть заявки'
+                                                : 'Заявки'}
                                         </button>
                                     </div>
                                 </div>
                                 <div className="flex-1">
-                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Создать сессию</label>
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">
+                                        Создать сессию
+                                    </label>
                                     <div className="flex gap-2">
                                         <input
                                             value={newSessionName}
-                                            onChange={(e) => setNewSessionName(e.target.value)}
+                                            onChange={(e) =>
+                                                setNewSessionName(
+                                                    e.target.value
+                                                )
+                                            }
                                             placeholder="Название"
                                             className="flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
                                         />
-                                        <button onClick={handleCreateSession} className="rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700">Создать</button>
+                                        <button
+                                            onClick={handleCreateSession}
+                                            className="rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700"
+                                        >
+                                            Создать
+                                        </button>
                                     </div>
                                 </div>
                                 <div className="flex-1">
-                                    <label className="mb-2 block text-sm font-semibold text-gray-700">Присоединиться по коду</label>
+                                    <label className="mb-2 block text-sm font-semibold text-gray-700">
+                                        Присоединиться по коду
+                                    </label>
                                     <div className="flex gap-2">
                                         <input
                                             value={joinCode}
-                                            onChange={(e) => setJoinCode(e.target.value)}
+                                            onChange={(e) =>
+                                                setJoinCode(e.target.value)
+                                            }
                                             placeholder="Код приглашения"
                                             className="flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
                                         />
-                                        <button onClick={handleJoinByCode} className="rounded-lg bg-gray-800 px-4 py-2 font-medium text-white hover:bg-gray-900">Отправить</button>
+                                        <button
+                                            onClick={handleJoinByCode}
+                                            className="rounded-lg bg-gray-800 px-4 py-2 font-medium text-white hover:bg-gray-900"
+                                        >
+                                            Отправить
+                                        </button>
                                     </div>
-                                    {joinMessage && <p className="mt-2 text-sm text-gray-600">{joinMessage}</p>}
+                                    {joinMessage && (
+                                        <p className="mt-2 text-sm text-gray-600">
+                                            {joinMessage}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             {showAdminPanel && activeSessionId && (
                                 <div className="mt-6 rounded-lg border border-gray-200 p-4">
-                                    <div className="mb-3 text-sm font-semibold text-gray-800">Ожидающие заявки</div>
+                                    <div className="mb-3 text-sm font-semibold text-gray-800">
+                                        Ожидающие заявки
+                                    </div>
                                     {pendingRequests.length === 0 ? (
-                                        <p className="text-sm text-gray-500">Нет заявок</p>
+                                        <p className="text-sm text-gray-500">
+                                            Нет заявок
+                                        </p>
                                     ) : (
                                         <div className="space-y-2">
                                             {pendingRequests.map((r) => (
-                                                <div key={r.id} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2">
-                                                    <div className="text-sm">{r.requester_username}</div>
+                                                <div
+                                                    key={r.id}
+                                                    className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2"
+                                                >
+                                                    <div className="text-sm">
+                                                        {r.requester_username}
+                                                    </div>
                                                     <div className="flex gap-2">
-                                                        <button onClick={() => approveRequest(r.id)} className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700">Принять</button>
-                                                        <button onClick={() => denyRequest(r.id)} className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700">Отклонить</button>
-                                                        <button onClick={() => blockRequester(r.requester)} className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700">Заблокировать</button>
+                                                        <button
+                                                            onClick={() =>
+                                                                approveRequest(
+                                                                    r.id
+                                                                )
+                                                            }
+                                                            className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                                                        >
+                                                            Принять
+                                                        </button>
+                                                        <button
+                                                            onClick={() =>
+                                                                denyRequest(
+                                                                    r.id
+                                                                )
+                                                            }
+                                                            className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700"
+                                                        >
+                                                            Отклонить
+                                                        </button>
+                                                        <button
+                                                            onClick={() =>
+                                                                blockRequester(
+                                                                    r.requester
+                                                                )
+                                                            }
+                                                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                                                        >
+                                                            Заблокировать
+                                                        </button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -646,7 +741,7 @@ const FireList = () => {
                         </div>
                     )}
                     <div className="animate-slide-up mb-8 text-center">
-                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold text-transparent">
+                        <h2 className="mb-2 bg-clip-text text-3xl font-bold">
                             🔥 Мониторинг пожаров
                         </h2>
                         <p className="text-gray-600">
@@ -802,14 +897,18 @@ const FireList = () => {
                                                 : '📉 Сначала низкие'}
                                         </option>
                                     </select>
-                                    
+
                                     <div className="mt-4">
                                         <h4 className="mb-2 text-sm font-semibold text-gray-700">
                                             📄 Записей на странице
                                         </h4>
                                         <select
                                             value={pagination.pageSize}
-                                            onChange={(e) => changePageSize(Number(e.target.value))}
+                                            onChange={(e) =>
+                                                changePageSize(
+                                                    Number(e.target.value)
+                                                )
+                                            }
                                             className="w-full rounded-lg border border-gray-300 px-3 py-2 transition-all duration-200 hover:scale-[1.02] focus:border-red-500 focus:outline-none"
                                         >
                                             <option value={5}>5</option>
@@ -1021,12 +1120,18 @@ const FireList = () => {
                         <div className="animate-fade-in mt-8 flex flex-col items-center justify-center space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-lg">
                             <div className="flex items-center space-x-2 text-sm text-gray-600">
                                 <span>Страница</span>
-                                <span className="font-semibold text-red-600">{pagination.currentPage}</span>
+                                <span className="font-semibold text-red-600">
+                                    {pagination.currentPage}
+                                </span>
                                 <span>из</span>
-                                <span className="font-semibold text-red-600">{pagination.totalPages}</span>
-                                <span>• Всего записей: {pagination.totalCount}</span>
+                                <span className="font-semibold text-red-600">
+                                    {pagination.totalPages}
+                                </span>
+                                <span>
+                                    • Всего записей: {pagination.totalCount}
+                                </span>
                             </div>
-                            
+
                             <div className="flex items-center space-x-2">
                                 {/* Кнопка "Предыдущая" */}
                                 <button
@@ -1034,44 +1139,76 @@ const FireList = () => {
                                     disabled={!pagination.hasPrevious}
                                     className={`flex items-center space-x-1 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${
                                         pagination.hasPrevious
-                                            ? 'bg-red-50 text-red-700 hover:bg-red-100 hover:scale-105'
-                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            ? 'bg-red-50 text-red-700 hover:scale-105 hover:bg-red-100'
+                                            : 'cursor-not-allowed bg-gray-100 text-gray-400'
                                     }`}
                                 >
-                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    <svg
+                                        className="h-4 w-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M15 19l-7-7 7-7"
+                                        />
                                     </svg>
                                     <span>Предыдущая</span>
                                 </button>
 
                                 {/* Номера страниц */}
                                 <div className="flex items-center space-x-1">
-                                    {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
-                                        let pageNum;
-                                        if (pagination.totalPages <= 5) {
-                                            pageNum = i + 1;
-                                        } else if (pagination.currentPage <= 3) {
-                                            pageNum = i + 1;
-                                        } else if (pagination.currentPage >= pagination.totalPages - 2) {
-                                            pageNum = pagination.totalPages - 4 + i;
-                                        } else {
-                                            pageNum = pagination.currentPage - 2 + i;
-                                        }
+                                    {Array.from(
+                                        {
+                                            length: Math.min(
+                                                5,
+                                                pagination.totalPages
+                                            ),
+                                        },
+                                        (_, i) => {
+                                            let pageNum
+                                            if (pagination.totalPages <= 5) {
+                                                pageNum = i + 1
+                                            } else if (
+                                                pagination.currentPage <= 3
+                                            ) {
+                                                pageNum = i + 1
+                                            } else if (
+                                                pagination.currentPage >=
+                                                pagination.totalPages - 2
+                                            ) {
+                                                pageNum =
+                                                    pagination.totalPages -
+                                                    4 +
+                                                    i
+                                            } else {
+                                                pageNum =
+                                                    pagination.currentPage -
+                                                    2 +
+                                                    i
+                                            }
 
-                                        return (
-                                            <button
-                                                key={pageNum}
-                                                onClick={() => goToPage(pageNum)}
-                                                className={`w-10 h-10 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                                    pageNum === pagination.currentPage
-                                                        ? 'bg-red-600 text-white shadow-lg'
-                                                        : 'bg-gray-100 text-gray-700 hover:bg-red-50 hover:text-red-700 hover:scale-105'
-                                                }`}
-                                            >
-                                                {pageNum}
-                                            </button>
-                                        );
-                                    })}
+                                            return (
+                                                <button
+                                                    key={pageNum}
+                                                    onClick={() =>
+                                                        goToPage(pageNum)
+                                                    }
+                                                    className={`h-10 w-10 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                                        pageNum ===
+                                                        pagination.currentPage
+                                                            ? 'bg-red-600 text-white shadow-lg'
+                                                            : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-red-50 hover:text-red-700'
+                                                    }`}
+                                                >
+                                                    {pageNum}
+                                                </button>
+                                            )
+                                        }
+                                    )}
                                 </div>
 
                                 {/* Кнопка "Следующая" */}
@@ -1080,13 +1217,23 @@ const FireList = () => {
                                     disabled={!pagination.hasNext}
                                     className={`flex items-center space-x-1 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${
                                         pagination.hasNext
-                                            ? 'bg-red-50 text-red-700 hover:bg-red-100 hover:scale-105'
-                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            ? 'bg-red-50 text-red-700 hover:scale-105 hover:bg-red-100'
+                                            : 'cursor-not-allowed bg-gray-100 text-gray-400'
                                     }`}
                                 >
                                     <span>Следующая</span>
-                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    <svg
+                                        className="h-4 w-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M9 5l7 7-7 7"
+                                        />
                                     </svg>
                                 </button>
                             </div>

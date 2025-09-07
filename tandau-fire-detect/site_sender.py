@@ -74,6 +74,41 @@ def _get_session_code() -> str | None:
     return None
 
 
+def _save_text(filepath: str, content: str) -> None:
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content.strip())
+    except Exception as e:
+        print(f"⚠️ Не удалось сохранить файл {filepath}: {e}")
+
+
+def ensure_configuration_interactive() -> None:
+    """Проверяет наличие токена и сессии, при отсутствии предлагает ввести и сохраняет в файлы."""
+    base_dir = os.path.dirname(__file__)
+    token = _get_access_token()
+    if not token:
+        print("\nНастройка доступа к сайту:")
+        token = input("Введите JWT Access Token (скопируйте из профиля/логина): ").strip()
+        if token:
+            _save_text(os.path.join(base_dir, "token.txt"), token)
+            print("✅ token.txt сохранён.")
+        else:
+            print("⚠️ Токен не указан. Отправка на сайт может не работать.")
+
+    # Если нет ни числового ID, ни кода — запросим у пользователя
+    session_id = _get_session_id()
+    session_code = _get_session_code()
+    if session_id is None and not session_code:
+        print("\nПривязка к сессии:")
+        value = input("Введите ID сессии (число) или код (например ML6GW81a): ").strip()
+        if value:
+            # Сохраняем в session.txt в том виде, как введено
+            _save_text(os.path.join(base_dir, "session.txt"), value)
+            print("✅ session.txt сохранён.")
+        else:
+            print("ℹ️ Сессия не задана. Детекции не будут привязаны к конкретной сессии.")
+
+
 def send_to_site(image_path, location, conf):
     now = datetime.now().isoformat()
     lat, lon = CAMERA_COORDINATES.get(location, (None, None))

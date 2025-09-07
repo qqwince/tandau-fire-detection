@@ -93,7 +93,7 @@ function Landing() {
                         </motion.h2>
                     </AnimatePresence>
                 </div>
-                <Link to="/firesites">
+                <Link to="/fires">
                     <motion.button
                         whileHover={{ scale: 1.01 }}
                         whileTap={{ scale: 0.95 }}

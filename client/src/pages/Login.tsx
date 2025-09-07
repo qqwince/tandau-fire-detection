@@ -59,15 +59,17 @@ const Login = () => {
     }
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
+        <div className="mt-[150px] flex items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
             <div className="w-full max-w-md">
                 <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 shadow-lg">
                     <div className="mb-8 text-center">
-                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold text-transparent">
+                        <h2 className="mb-2 bg-clip-text text-3xl font-bold">
                             🔥 {isLogin ? 'Вход' : 'Регистрация'}
                         </h2>
                         <p className="text-gray-600">
-                            {isLogin ? 'Добро пожаловать обратно!' : 'Создайте новый аккаунт'}
+                            {isLogin
+                                ? 'Добро пожаловать обратно!'
+                                : 'Создайте новый аккаунт'}
                         </p>
                     </div>
 
@@ -80,8 +82,10 @@ const Login = () => {
                                             type="text"
                                             placeholder="Имя"
                                             value={firstName}
-                                            onChange={(e) => setFirstName(e.target.value)}
-                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                            onChange={(e) =>
+                                                setFirstName(e.target.value)
+                                            }
+                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                         />
                                     </div>
                                     <div>
@@ -89,8 +93,10 @@ const Login = () => {
                                             type="text"
                                             placeholder="Фамилия"
                                             value={lastName}
-                                            onChange={(e) => setLastName(e.target.value)}
-                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                            onChange={(e) =>
+                                                setLastName(e.target.value)
+                                            }
+                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                         />
                                     </div>
                                 </div>
@@ -103,7 +109,7 @@ const Login = () => {
                                 placeholder="Email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                 required
                             />
                         </div>
@@ -114,7 +120,7 @@ const Login = () => {
                                 placeholder="Пароль"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                 required
                                 minLength={8}
                             />
@@ -126,8 +132,10 @@ const Login = () => {
                                     type="password"
                                     placeholder="Подтвердите пароль"
                                     value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                    onChange={(e) =>
+                                        setConfirmPassword(e.target.value)
+                                    }
+                                    className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                     required
                                     minLength={8}
                                 />
@@ -135,7 +143,7 @@ const Login = () => {
                         )}
 
                         {error && (
-                            <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-3">
                                 <p className="text-sm text-red-600">{error}</p>
                             </div>
                         )}
@@ -143,15 +151,17 @@ const Login = () => {
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className="w-full rounded-lg bg-gradient-to-r from-red-600 to-orange-600 py-2 text-white font-medium transition-all duration-200 hover:from-red-700 hover:to-orange-700 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                            className="w-full rounded-lg bg-gradient-to-r from-red-600 to-orange-600 py-2 font-medium text-white transition-all duration-200 hover:scale-105 hover:from-red-700 hover:to-orange-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
                         >
                             {isLoading ? (
                                 <div className="flex items-center justify-center">
                                     <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                                     {isLogin ? 'Вход...' : 'Регистрация...'}
                                 </div>
+                            ) : isLogin ? (
+                                'Войти'
                             ) : (
-                                isLogin ? 'Войти' : 'Зарегистрироваться'
+                                'Зарегистрироваться'
                             )}
                         </button>
                     </form>
@@ -164,7 +174,7 @@ const Login = () => {
                                     setIsLogin(!isLogin)
                                     setError('')
                                 }}
-                                className="text-red-600 font-medium hover:underline transition-colors duration-200"
+                                className="font-medium text-red-600 transition-colors duration-200 hover:underline"
                             >
                                 {isLogin ? 'Зарегистрироваться' : 'Войти'}
                             </button>

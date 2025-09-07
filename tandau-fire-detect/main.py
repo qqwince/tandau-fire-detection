@@ -3,7 +3,7 @@ import os
 from ultralytics import YOLO
 import threading
 import time
-from site_sender import send_to_site
+from site_sender import send_to_site, ensure_configuration_interactive
 
 # Настройки оптимизации
 CONFIG = {
@@ -206,6 +206,9 @@ def print_config():
 
 
 if __name__ == "__main__":
+    # Интерактивная проверка и сохранение конфигурации (токен/сессия)
+    ensure_configuration_interactive()
+
     # Печать конфигурации
     print_config()
 
