@@ -1,0 +1,62 @@
+import { $host } from './index.ts'
+
+export interface User {
+    id: number
+    username: string
+    email: string
+    first_name: string
+    last_name: string
+    date_joined: string
+}
+
+export interface AuthResponse {
+    user: User
+    tokens: {
+        access: string
+        refresh: string
+    }
+}
+
+export interface LoginData {
+    username: string
+    password: string
+}
+
+export interface RegisterData {
+    username: string
+    email: string
+    password: string
+    password_confirm: string
+    first_name?: string
+    last_name?: string
+}
+
+export interface RefreshResponse {
+    access: string
+}
+
+// Регистрация пользователя
+export const registerUser = async (data: RegisterData): Promise<AuthResponse> => {
+    const { data: response } = await $host.post('/api/auth/register/', data)
+    return response
+}
+
+// Вход пользователя
+export const loginUser = async (data: LoginData): Promise<AuthResponse> => {
+    const { data: response } = await $host.post('/api/auth/login/', data)
+    return response
+}
+
+// Обновление токена
+export const refreshToken = async (refreshToken: string): Promise<RefreshResponse> => {
+    const { data: response } = await $host.post('/api/auth/refresh/', {
+        refresh: refreshToken
+    })
+    return response
+}
+
+// Получение профиля пользователя
+export const getUserProfile = async (): Promise<User> => {
+    const { data: response } = await $host.get('/api/auth/profile/')
+    return response
+}

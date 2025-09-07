@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { fetchFireSites } from '../http/fireSites.ts'
+import { fetchFireSites, type PaginationParams, type PaginatedResponse } from '../http/fireSites.ts'
 
 interface FireSite {
     id: string
@@ -52,10 +52,20 @@ const FireList = () => {
         confMin: 30,
         confMax: 100,
     })
+    
+    // Состояние пагинации
+    const [pagination, setPagination] = useState({
+        currentPage: 1,
+        totalPages: 1,
+        totalCount: 0,
+        pageSize: 10,
+        hasNext: false,
+        hasPrevious: false,
+    })
 
     useEffect(() => {
         loadSites()
-    }, [])
+    }, [filters, pagination.currentPage, pagination.pageSize])
 
     // Keyboard and mouse event handlers for image modal
     useEffect(() => {
@@ -99,7 +109,7 @@ const FireList = () => {
         }
 
         // Auto-hide controls when zooming
-        let hideControlsTimer: NodeJS.Timeout
+        let hideControlsTimer: ReturnType<typeof setTimeout>
         if (selectedImage && imageScale > 1.25) {
             hideControlsTimer = setTimeout(() => {
                 setShowControls(false)
@@ -133,10 +143,37 @@ const FireList = () => {
 
     const loadSites = async () => {
         try {
-            const data = await fetchFireSites()
-            setSites(Array.isArray(data) ? data : [])
+            setLoading(true)
+            
+            const params: PaginationParams = {
+                page: pagination.currentPage,
+                page_size: pagination.pageSize,
+                sort_field: filters.sortField,
+                sort_order: filters.sortOrder,
+                conf_min: filters.confMin,
+                conf_max: filters.confMax,
+            }
+            
+            // Добавляем фильтр по локации если выбраны конкретные локации
+            if (filters.selectedLocations.length > 0) {
+                // Для множественного выбора локаций используем первую выбранную
+                // В будущем можно расширить API для поддержки массива локаций
+                params.location = filters.selectedLocations[0]
+            }
+            
+            const data: PaginatedResponse<FireSite> = await fetchFireSites(params)
+            
+            setSites(data.results || [])
+            setPagination(prev => ({
+                ...prev,
+                totalPages: data.total_pages,
+                totalCount: data.count,
+                hasNext: data.has_next,
+                hasPrevious: data.has_previous,
+            }))
         } catch (error) {
             console.error('Ошибка при загрузке:', error)
+            setSites([])
         } finally {
             setLoading(false)
         }
@@ -144,6 +181,8 @@ const FireList = () => {
 
     const updateFilters = (updates: Partial<Filters>) => {
         setFilters((prev) => ({ ...prev, ...updates }))
+        // Сбрасываем пагинацию при изменении фильтров
+        setPagination(prev => ({ ...prev, currentPage: 1 }))
     }
 
     const toggleLocation = (location: string) => {
@@ -152,6 +191,33 @@ const FireList = () => {
             : [...filters.selectedLocations, location]
 
         updateFilters({ selectedLocations: newLocations })
+    }
+
+    // Функции для управления пагинацией
+    const goToPage = (page: number) => {
+        if (page >= 1 && page <= pagination.totalPages) {
+            setPagination(prev => ({ ...prev, currentPage: page }))
+        }
+    }
+
+    const goToNextPage = () => {
+        if (pagination.hasNext) {
+            goToPage(pagination.currentPage + 1)
+        }
+    }
+
+    const goToPreviousPage = () => {
+        if (pagination.hasPrevious) {
+            goToPage(pagination.currentPage - 1)
+        }
+    }
+
+    const changePageSize = (newPageSize: number) => {
+        setPagination(prev => ({ 
+            ...prev, 
+            pageSize: newPageSize,
+            currentPage: 1 // Сбрасываем на первую страницу при изменении размера
+        }))
     }
 
     const handleApproval = (siteId: string, event: React.MouseEvent) => {
@@ -236,33 +302,6 @@ const FireList = () => {
         }
     }
 
-    const getFilteredAndSortedSites = () => {
-        return sites
-            .filter((site) => {
-                const locationMatch =
-                    filters.selectedLocations.length === 0 ||
-                    filters.selectedLocations.includes(site.location)
-
-                const confMatch =
-                    Math.round(site.conf) >= filters.confMin &&
-                    Math.round(site.conf) <= filters.confMax
-
-                return locationMatch && confMatch
-            })
-            .sort((a, b) => {
-                let comparison = 0
-
-                if (filters.sortField === 'time') {
-                    const dateA = new Date(a.time).getTime()
-                    const dateB = new Date(b.time).getTime()
-                    comparison = dateA - dateB
-                } else if (filters.sortField === 'conf') {
-                    comparison = a.conf - b.conf
-                }
-
-                return filters.sortOrder === 'asc' ? comparison : -comparison
-            })
-    }
 
     if (loading) {
         return (
@@ -279,11 +318,10 @@ const FireList = () => {
     }
 
     const locations = Array.from(new Set(sites.map((site) => site.location)))
-    const filteredSites = getFilteredAndSortedSites()
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
-            <style jsx>{`
+            <style>{`
                 @keyframes fadeIn {
                     from {
                         opacity: 0;
@@ -439,11 +477,11 @@ const FireList = () => {
                             🔥 Мониторинг пожаров
                         </h2>
                         <p className="text-gray-600">
-                            Найдено{' '}
+                            Показано{' '}
                             <span className="font-semibold text-red-600">
-                                {filteredSites.length}
+                                {sites.length}
                             </span>{' '}
-                            из {sites.length} активных очагов
+                            из {pagination.totalCount} активных очагов
                             {approvedSites.size > 0 && (
                                 <span className="ml-2">
                                     •{' '}
@@ -546,7 +584,7 @@ const FireList = () => {
                                 </div>
                             </div>
 
-                            {/* Сортировка */}
+                            {/* Сортировка и пагинация */}
                             <div className="animate-slide-up stagger-3">
                                 <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-gray-800">
                                     📊 Сортировка
@@ -591,13 +629,29 @@ const FireList = () => {
                                                 : '📉 Сначала низкие'}
                                         </option>
                                     </select>
+                                    
+                                    <div className="mt-4">
+                                        <h4 className="mb-2 text-sm font-semibold text-gray-700">
+                                            📄 Записей на странице
+                                        </h4>
+                                        <select
+                                            value={pagination.pageSize}
+                                            onChange={(e) => changePageSize(Number(e.target.value))}
+                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 transition-all duration-200 hover:scale-[1.02] focus:border-red-500 focus:outline-none"
+                                        >
+                                            <option value={5}>5</option>
+                                            <option value={10}>10</option>
+                                            <option value={20}>20</option>
+                                            <option value={50}>50</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Список пожаров */}
-                    {filteredSites.length === 0 ? (
+                    {sites.length === 0 ? (
                         <div className="animate-fade-in py-16 text-center">
                             <div className="mb-4 animate-bounce text-6xl">
                                 🔍
@@ -611,7 +665,7 @@ const FireList = () => {
                         </div>
                     ) : (
                         <div className="grid gap-6">
-                            {filteredSites.map((site, index) => (
+                            {sites.map((site, index) => (
                                 <div
                                     key={site.id}
                                     className={`animate-slide-up overflow-hidden rounded-2xl border shadow-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${
@@ -786,6 +840,83 @@ const FireList = () => {
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* Панель пагинации */}
+                    {pagination.totalPages > 1 && (
+                        <div className="animate-fade-in mt-8 flex flex-col items-center justify-center space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-lg">
+                            <div className="flex items-center space-x-2 text-sm text-gray-600">
+                                <span>Страница</span>
+                                <span className="font-semibold text-red-600">{pagination.currentPage}</span>
+                                <span>из</span>
+                                <span className="font-semibold text-red-600">{pagination.totalPages}</span>
+                                <span>• Всего записей: {pagination.totalCount}</span>
+                            </div>
+                            
+                            <div className="flex items-center space-x-2">
+                                {/* Кнопка "Предыдущая" */}
+                                <button
+                                    onClick={goToPreviousPage}
+                                    disabled={!pagination.hasPrevious}
+                                    className={`flex items-center space-x-1 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                                        pagination.hasPrevious
+                                            ? 'bg-red-50 text-red-700 hover:bg-red-100 hover:scale-105'
+                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                    <span>Предыдущая</span>
+                                </button>
+
+                                {/* Номера страниц */}
+                                <div className="flex items-center space-x-1">
+                                    {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                                        let pageNum;
+                                        if (pagination.totalPages <= 5) {
+                                            pageNum = i + 1;
+                                        } else if (pagination.currentPage <= 3) {
+                                            pageNum = i + 1;
+                                        } else if (pagination.currentPage >= pagination.totalPages - 2) {
+                                            pageNum = pagination.totalPages - 4 + i;
+                                        } else {
+                                            pageNum = pagination.currentPage - 2 + i;
+                                        }
+
+                                        return (
+                                            <button
+                                                key={pageNum}
+                                                onClick={() => goToPage(pageNum)}
+                                                className={`w-10 h-10 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                                    pageNum === pagination.currentPage
+                                                        ? 'bg-red-600 text-white shadow-lg'
+                                                        : 'bg-gray-100 text-gray-700 hover:bg-red-50 hover:text-red-700 hover:scale-105'
+                                                }`}
+                                            >
+                                                {pageNum}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Кнопка "Следующая" */}
+                                <button
+                                    onClick={goToNextPage}
+                                    disabled={!pagination.hasNext}
+                                    className={`flex items-center space-x-1 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                                        pagination.hasNext
+                                            ? 'bg-red-50 text-red-700 hover:bg-red-100 hover:scale-105'
+                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <span>Следующая</span>
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     )}
 

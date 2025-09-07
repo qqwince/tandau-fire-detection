@@ -5,7 +5,8 @@ import Landing from '../pages/Landing.tsx'
 import Login from '../pages/Login.tsx'
 import Header from '../shared/components/Header.tsx'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import FireList from '../pages/FireList.tsx' // ✅ правильно
+import FireList from '../pages/FireList.tsx'
+import { AuthProvider } from '../contexts/AuthContext'
 
 const router = createBrowserRouter([
     {
@@ -18,7 +19,7 @@ const router = createBrowserRouter([
         ),
     },
     {
-        path: '/firesites',
+        path: '/fires',
         element: (
             <>
                 <Header />
@@ -39,6 +40,8 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
-        <RouterProvider router={router} />
+        <AuthProvider>
+            <RouterProvider router={router} />
+        </AuthProvider>
     </StrictMode>
 )

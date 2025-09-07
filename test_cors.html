@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест CORS</title>
+</head>
+<body>
+    <h1>Тест CORS для регистрации</h1>
+    <button onclick="testCORS()">Тест CORS</button>
+    <div id="result"></div>
+
+    <script>
+        async function testCORS() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Тестируем...';
+            
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/auth/register/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'testuser2',
+                        email: 'test2@example.com',
+                        password: 'testpassword123',
+                        password_confirm: 'testpassword123',
+                        first_name: 'Test',
+                        last_name: 'User'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `<p style="color: green;">Успех! Пользователь создан: ${data.user.username}</p>`;
+                } else {
+                    const error = await response.text();
+                    resultDiv.innerHTML = `<p style="color: red;">Ошибка: ${response.status} - ${error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: red;">Ошибка CORS: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

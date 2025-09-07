@@ -1,81 +1,176 @@
 import { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import { useNavigate } from 'react-router-dom'
 
 const Login = () => {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
+    const [firstName, setFirstName] = useState('')
+    const [lastName, setLastName] = useState('')
     const [isLogin, setIsLogin] = useState(true)
+    const [isLoading, setIsLoading] = useState(false)
+    const [error, setError] = useState('')
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const { login, register } = useAuth()
+    const navigate = useNavigate()
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        console.log('Email:', email, 'Password:', password)
+        setIsLoading(true)
+        setError('')
+
+        try {
+            if (isLogin) {
+                await login({ username: email, password })
+            } else {
+                if (password !== confirmPassword) {
+                    setError('Пароли не совпадают')
+                    setIsLoading(false)
+                    return
+                }
+                await register({
+                    username: email,
+                    email,
+                    password,
+                    password_confirm: confirmPassword,
+                    first_name: firstName,
+                    last_name: lastName,
+                })
+            }
+            navigate('/fires')
+        } catch (err: any) {
+            if (err.response?.data) {
+                if (typeof err.response.data === 'string') {
+                    setError(err.response.data)
+                } else if (err.response.data.detail) {
+                    setError(err.response.data.detail)
+                } else if (err.response.data.non_field_errors) {
+                    setError(err.response.data.non_field_errors[0])
+                } else {
+                    setError('Произошла ошибка при аутентификации')
+                }
+            } else {
+                setError('Произошла ошибка при аутентификации')
+            }
+        } finally {
+            setIsLoading(false)
+        }
     }
 
     return (
-        <div className="flex items-center justify-center">
-            <div className="mt-[100px] flex h-[400px] w-[20vw] flex-col justify-center rounded-2xl border-2 p-8 shadow-lg">
-                <h2 className="mb-8 text-center text-3xl font-bold">
-                    {isLogin ? 'Вход' : 'Регистрация'}
-                </h2>
-                <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                    <div className="flex flex-col">
-                        <input
-                            type="email"
-                            placeholder="Email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="rounded-lg border px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                            required
-                        />
-                        <span className="text-[#ff6d6d]">Error message!</span>
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
+            <div className="w-full max-w-md">
+                <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 shadow-lg">
+                    <div className="mb-8 text-center">
+                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold text-transparent">
+                            🔥 {isLogin ? 'Вход' : 'Регистрация'}
+                        </h2>
+                        <p className="text-gray-600">
+                            {isLogin ? 'Добро пожаловать обратно!' : 'Создайте новый аккаунт'}
+                        </p>
                     </div>
-                    <div className="flex flex-col">
-                        <input
-                            type="password"
-                            placeholder="Пароль"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="rounded-lg border px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                            required
-                        />
-                        <span className="text-[#ff6d6d]">Error message!</span>
-                    </div>
-                    {isLogin ? (
+
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        {!isLogin && (
+                            <>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <input
+                                            type="text"
+                                            placeholder="Имя"
+                                            value={firstName}
+                                            onChange={(e) => setFirstName(e.target.value)}
+                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                        />
+                                    </div>
+                                    <div>
+                                        <input
+                                            type="text"
+                                            placeholder="Фамилия"
+                                            value={lastName}
+                                            onChange={(e) => setLastName(e.target.value)}
+                                            className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        <div>
+                            <input
+                                type="email"
+                                placeholder="Email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                required
+                            />
+                        </div>
+
+                        <div>
+                            <input
+                                type="password"
+                                placeholder="Пароль"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                required
+                                minLength={8}
+                            />
+                        </div>
+
+                        {!isLogin && (
+                            <div>
+                                <input
+                                    type="password"
+                                    placeholder="Подтвердите пароль"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                                    required
+                                    minLength={8}
+                                />
+                            </div>
+                        )}
+
+                        {error && (
+                            <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                                <p className="text-sm text-red-600">{error}</p>
+                            </div>
+                        )}
+
                         <button
                             type="submit"
-                            className="rounded-lg bg-blue-600 py-2 text-white transition hover:bg-blue-700"
+                            disabled={isLoading}
+                            className="w-full rounded-lg bg-gradient-to-r from-red-600 to-orange-600 py-2 text-white font-medium transition-all duration-200 hover:from-red-700 hover:to-orange-700 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                         >
-                            Войти
+                            {isLoading ? (
+                                <div className="flex items-center justify-center">
+                                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                                    {isLogin ? 'Вход...' : 'Регистрация...'}
+                                </div>
+                            ) : (
+                                isLogin ? 'Войти' : 'Зарегистрироваться'
+                            )}
                         </button>
-                    ) : (
-                        <button
-                            type="submit"
-                            className="rounded-lg bg-blue-600 py-2 text-white transition hover:bg-blue-700"
-                        >
-                            Зарегистрироваться
-                        </button>
-                    )}
-                </form>
-                {isLogin ? (
-                    <p className="mt-6 text-center text-gray-500">
-                        Нет аккаунта?{' '}
-                        <a
-                            onClick={(prev) => setIsLogin(false)}
-                            className="text-blue-600 hover:underline"
-                        >
-                            Зарегистрироваться
-                        </a>
-                    </p>
-                ) : (
-                    <p className="mt-6 text-center text-gray-500">
-                        Есть аккаунт?{' '}
-                        <a
-                            onClick={(prev) => setIsLogin(true)}
-                            className="text-blue-600 hover:underline"
-                        >
-                            Войти
-                        </a>
-                    </p>
-                )}
+                    </form>
+
+                    <div className="mt-6 text-center">
+                        <p className="text-gray-500">
+                            {isLogin ? 'Нет аккаунта?' : 'Есть аккаунт?'}{' '}
+                            <button
+                                onClick={() => {
+                                    setIsLogin(!isLogin)
+                                    setError('')
+                                }}
+                                className="text-red-600 font-medium hover:underline transition-colors duration-200"
+                            >
+                                {isLogin ? 'Зарегистрироваться' : 'Войти'}
+                            </button>
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
     )

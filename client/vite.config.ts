@@ -10,4 +10,7 @@ export default defineConfig({
   ],
   resolve: { alias: { '@': '/src' } },
   server: { port: 3000 },
+  define: {
+    'import.meta.env.VITE_API_URL': JSON.stringify('http://127.0.0.1:8000'),
+  },
 })
