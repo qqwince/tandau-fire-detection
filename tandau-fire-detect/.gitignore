@@ -1,3 +1,13 @@
 .fire_detections
 token.txt
 session.txt
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+ENV/
+.venv/
+.DS_Store
+Thumbs.db
+*.log

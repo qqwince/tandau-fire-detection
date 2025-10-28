@@ -1,4 +1,4 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -17,12 +17,60 @@ from .serializers import (
     MembershipSerializer,
     JoinRequestSerializer,
 )
+from django.http import StreamingHttpResponse
+import json
+import queue
+from typing import Dict, Any
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 
 class FirePagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
+# ---------------- Simple in-memory SSE broadcaster ----------------
+_subscribers: list[queue.Queue] = []
+
+def _sse_broadcast(event: Dict[str, Any]) -> None:
+    # push to all active subscribers; drop quietly if closed
+    for q in list(_subscribers):
+        try:
+            q.put_nowait(event)
+        except Exception:
+            pass
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def fire_stream(request):
+    """SSE stream that emits an event whenever a new Fire is created."""
+    client_queue: queue.Queue = queue.Queue()
+    _subscribers.append(client_queue)
+
+    def event_stream():
+        # tell client to retry quickly on disconnect
+        yield "retry: 2000\n\n"
+        try:
+            while True:
+                try:
+                    event = client_queue.get(timeout=30)
+                    payload = json.dumps(event, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+                except queue.Empty:
+                    # keep-alive comment
+                    yield ": keep-alive\n\n"
+        finally:
+            try:
+                _subscribers.remove(client_queue)
+            except ValueError:
+                pass
+
+    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'  # for nginx, if any
+    return response
 
 
 # Аутентификация views
@@ -79,6 +127,8 @@ def get_user_profile(request):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def receive_fire(request):
     # Разрешаем передавать либо числовой session (id), либо join_code
     data = request.data.copy()
@@ -92,7 +142,42 @@ def receive_fire(request):
 
     serializer = FireSerializer(data=data)
     if serializer.is_valid():
-        serializer.save()
+        instance = serializer.save()
+        # broadcast SSE event
+        try:
+            _sse_broadcast({
+                'type': 'fire_created',
+                'id': instance.id,
+                'session': instance.session_id,
+                'location': instance.location,
+                'time': instance.time.isoformat() if hasattr(instance.time, 'isoformat') else str(instance.time),
+                'conf': instance.conf,
+                'image': instance.image.url if getattr(instance, 'image', None) else '',
+            })
+        except Exception:
+            pass
+
+        # broadcast WebSocket event via channels group
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer is not None:
+                async_to_sync(channel_layer.group_send)(
+                    'fires',
+                    {
+                        'type': 'fire.created',
+                        'event': {
+                            'type': 'fire_created',
+                            'id': instance.id,
+                            'session': instance.session_id,
+                            'location': instance.location,
+                            'time': instance.time.isoformat() if hasattr(instance.time, 'isoformat') else str(instance.time),
+                            'conf': instance.conf,
+                            'image': instance.image.url if getattr(instance, 'image', None) else '',
+                        }
+                    }
+                )
+        except Exception:
+            pass
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

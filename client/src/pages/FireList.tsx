@@ -1,9 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import {
-    fetchFireSites,
-    type PaginationParams,
-    type PaginatedResponse,
-} from '../http/fireSites.ts'
+import { fetchFireSites, type PaginationParams, type PaginatedResponse } from '../features/fires/api'
 import { useAuth } from '../contexts/AuthContext.tsx'
 import {
     createSession,
@@ -17,37 +13,13 @@ import {
     type JoinRequest,
 } from '../http/auth.ts'
 
-interface FireSite {
-    id: string
-    location: string
-    time: string
-    description?: string
-    latitude: number
-    longitude: number
-    image?: string
-    conf: number
-}
-
-type SortField = 'time' | 'conf'
-type SortOrder = 'asc' | 'desc'
-
-interface Filters {
-    selectedLocations: string[]
-    sortField: SortField
-    sortOrder: SortOrder
-    confMin: number
-    confMax: number
-}
-
-interface ImagePosition {
-    x: number
-    y: number
-}
+import { type FireSite, type Filters, type ImagePosition, type SortField, type SortOrder } from '../features/fires/types'
 
 const FireList = () => {
     const { isAuthenticated } = useAuth()
     const [sites, setSites] = useState<FireSite[]>([])
     const [loading, setLoading] = useState(true)
+    const [hasLoaded, setHasLoaded] = useState(false)
     const [sessions, setSessions] = useState<Session[]>([])
     const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
     const [newSessionName, setNewSessionName] = useState('')
@@ -88,7 +60,150 @@ const FireList = () => {
     })
 
     useEffect(() => {
-        loadSites()
+        // Показываем большой лоадер только при самом первом входе
+        loadSites(true)
+    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
+
+    // Live updates via WebSocket with SSE/polling fallback
+    useEffect(() => {
+        const base = import.meta.env.VITE_API_URL
+        if (!base) return
+
+        let ws: WebSocket | null = null
+        let es: EventSource | null = null
+        ;(window as any).__fires_sse_active = false
+
+        const connectWebSocket = () => {
+            try {
+                const wsUrl = base.replace(/^http/, 'ws') + '/ws/fires/'
+                ws = new WebSocket(wsUrl)
+                ws.onopen = () => {
+                    ;(window as any).__fires_ws_active = true
+                }
+                ws.onmessage = (ev) => {
+                    try {
+                        const msg = JSON.parse(ev.data)
+                        if (msg?.type === 'fire_created') {
+                            const newItem = {
+                                id: String(msg.id),
+                                location: msg.location,
+                                time: msg.time,
+                                description: `Автоматическое обнаружение на ${msg.location}`,
+                                latitude: Number(msg.latitude ?? 0),
+                                longitude: Number(msg.longitude ?? 0),
+                                image: msg.image || '',
+                                conf: Number(msg.conf ?? 0),
+                            } as FireSite
+
+                            const locationOk =
+                                filters.selectedLocations.length === 0 ||
+                                filters.selectedLocations.includes(newItem.location)
+                            const confOk =
+                                Math.round(newItem.conf) >= filters.confMin &&
+                                Math.round(newItem.conf) <= filters.confMax
+                            const sessionOk =
+                                !activeSessionId || Number(msg.session) === activeSessionId
+
+                            if (locationOk && confOk && sessionOk) {
+                                setSites((prev) => {
+                                    const exists = prev.some((s) => s.id === newItem.id)
+                                    if (exists) return prev
+                                    const merged = [newItem, ...prev]
+                                    return merged.slice(0, pagination.pageSize)
+                                })
+                                setPagination((prev) => ({
+                                    ...prev,
+                                    totalCount: prev.totalCount + 1,
+                                }))
+                            }
+                        }
+                    } catch {}
+                }
+                ws.onerror = () => {
+                    ;(window as any).__fires_ws_active = false
+                }
+                ws.onclose = () => {
+                    ;(window as any).__fires_ws_active = false
+                    // fallback to SSE if WS closes
+                    connectSSE()
+                }
+            } catch {
+                connectSSE()
+            }
+        }
+
+        const connectSSE = () => {
+            try {
+                const streamUrl = `${base}/api/fires/stream/`
+                es = new EventSource(streamUrl)
+                es.onopen = () => {
+                    ;(window as any).__fires_sse_active = true
+                }
+                es.onmessage = (ev) => {
+                    try {
+                        const msg = JSON.parse(ev.data)
+                        if (msg?.type === 'fire_created') {
+                            const newItem = {
+                                id: String(msg.id),
+                                location: msg.location,
+                                time: msg.time,
+                                description: `Автоматическое обнаружение на ${msg.location}`,
+                                latitude: Number(msg.latitude ?? 0),
+                                longitude: Number(msg.longitude ?? 0),
+                                image: msg.image || '',
+                                conf: Number(msg.conf ?? 0),
+                            } as FireSite
+
+                            const locationOk =
+                                filters.selectedLocations.length === 0 ||
+                                filters.selectedLocations.includes(newItem.location)
+                            const confOk =
+                                Math.round(newItem.conf) >= filters.confMin &&
+                                Math.round(newItem.conf) <= filters.confMax
+                            const sessionOk =
+                                !activeSessionId || Number(msg.session) === activeSessionId
+
+                            if (locationOk && confOk && sessionOk) {
+                                setSites((prev) => {
+                                    const exists = prev.some((s) => s.id === newItem.id)
+                                    if (exists) return prev
+                                    const merged = [newItem, ...prev]
+                                    return merged.slice(0, pagination.pageSize)
+                                })
+                                setPagination((prev) => ({
+                                    ...prev,
+                                    totalCount: prev.totalCount + 1,
+                                }))
+                            }
+                        }
+                    } catch {}
+                }
+                es.onerror = () => {
+                    ;(window as any).__fires_sse_active = false
+                }
+            } catch {
+                // noop, will rely on polling
+            }
+        }
+
+        connectWebSocket()
+
+        return () => {
+            try { ws && ws.close() } catch {}
+            try { es && es.close() } catch {}
+        }
+    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
+
+    // Background polling only if both WS and SSE are down
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const wsActive = (window as any).__fires_ws_active
+            const sseActive = (window as any).__fires_sse_active
+            if (!wsActive && !sseActive) {
+                loadSites()
+            }
+        }, 15000)
+        return () => clearInterval(interval)
     }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
 
     useEffect(() => {
@@ -182,9 +297,12 @@ const FireList = () => {
         }
     }
 
-    const loadSites = async () => {
+    const loadSites = async (showInitialSpinner = false) => {
         try {
-            setLoading(true)
+            // Избегаем глобального спиннера после первого рендера
+            if (showInitialSpinner && !hasLoaded) {
+                setLoading(true)
+            }
 
             const params: PaginationParams = {
                 page: pagination.currentPage,
@@ -206,8 +324,20 @@ const FireList = () => {
             const data: PaginatedResponse<FireSite> =
                 await fetchFireSites(params)
 
-            setSites(data.results || [])
-            setPagination((prev) => ({
+            // Мягкая замена данных без пустого экрана
+            const newList = data.results || []
+            setSites((prev: FireSite[]) => {
+                if (!prev.length) return newList
+                // Попробуем сохранить плавность: если сортировка по времени desc —
+                // добавляем новые сверху, существующие оставляем
+                const byId = new Map(prev.map((s) => [s.id, s]))
+                const merged: FireSite[] = []
+                for (const item of newList) {
+                    merged.push(byId.get(item.id) ?? item)
+                }
+                return merged
+            })
+            setPagination((prev: typeof pagination) => ({
                 ...prev,
                 totalPages: data.total_pages,
                 totalCount: data.count,
@@ -216,9 +346,10 @@ const FireList = () => {
             }))
         } catch (error) {
             console.error('Ошибка при загрузке:', error)
-            setSites([])
+            // Не очищаем текущие карточки чтобы избежать мигания
         } finally {
             setLoading(false)
+            setHasLoaded(true)
         }
     }
 
@@ -306,7 +437,7 @@ const FireList = () => {
 
     const toggleLocation = (location: string) => {
         const newLocations = filters.selectedLocations.includes(location)
-            ? filters.selectedLocations.filter((loc) => loc !== location)
+            ? filters.selectedLocations.filter((loc: string) => loc !== location)
             : [...filters.selectedLocations, location]
 
         updateFilters({ selectedLocations: newLocations })
@@ -421,7 +552,7 @@ const FireList = () => {
         }
     }
 
-    if (loading) {
+    if (!hasLoaded && loading) {
         return (
             <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
                 <div className="animate-fade-in text-center">
@@ -741,7 +872,7 @@ const FireList = () => {
                         </div>
                     )}
                     <div className="animate-slide-up mb-8 text-center">
-                        <h2 className="mb-2 bg-clip-text text-3xl font-bold">
+                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold">
                             🔥 Мониторинг пожаров
                         </h2>
                         <p className="text-gray-600">
@@ -924,16 +1055,8 @@ const FireList = () => {
 
                     {/* Список пожаров */}
                     {sites.length === 0 ? (
-                        <div className="animate-fade-in py-16 text-center">
-                            <div className="mb-4 animate-bounce text-6xl">
-                                🔍
-                            </div>
-                            <p className="mb-2 text-xl text-gray-500">
-                                Пожары не найдены
-                            </p>
-                            <p className="text-gray-400">
-                                Попробуйте изменить параметры фильтров
-                            </p>
+                        <div className="py-16 text-center">
+                            <p className="text-gray-400">Нет данных по текущим фильтрам</p>
                         </div>
                     ) : (
                         <div className="grid gap-6">

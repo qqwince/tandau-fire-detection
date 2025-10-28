@@ -1,3 +1,12 @@
+Deployment (GitHub Pages)
+1) Set repo Settings → Pages → Build and deployment: GitHub Actions
+2) Add repository Secret: BACKEND_URL (e.g. http://YOUR_HOST:8000)
+3) Push to main/master. The workflow builds client/ and publishes dist/
+4) Your site will be at: https://<user>.github.io/<repo>/
+
+Local env
+- Create .env with VITE_API_URL=http://127.0.0.1:8000
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

@@ -4,6 +4,7 @@ from .views import (
     register_user, login_user, refresh_token, get_user_profile,
     create_session, my_sessions, request_join_by_code,
     pending_requests_for_session, approve_request, deny_request, block_requester,
+    fire_stream,
 )
 
 urlpatterns = [
@@ -17,6 +18,7 @@ urlpatterns = [
     path('api/fire/', receive_fire, name='receive_fire'),       # POST для создания пожара
     path('api/fires/', list_fires, name='list_fires'),         # GET для всех пожаров
     path('api/fires/map/', map_fires, name='map_fires'),       # GET для данных с координатами
+    path('api/fires/stream/', fire_stream, name='fire_stream'),# SSE stream for new fires
 
     # Сессии и заявки
     path('api/sessions/', create_session, name='create_session'),            # POST create
