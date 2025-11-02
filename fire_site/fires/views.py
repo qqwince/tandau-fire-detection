@@ -21,8 +21,6 @@ from django.http import StreamingHttpResponse
 import json
 import queue
 from typing import Dict, Any
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 
 
 class FirePagination(PageNumberPagination):
@@ -41,16 +39,18 @@ def _sse_broadcast(event: Dict[str, Any]) -> None:
             pass
 
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-@authentication_classes([])
+from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt
+@require_GET
 def fire_stream(request):
-    """SSE stream that emits an event whenever a new Fire is created."""
+    """Plain Django SSE endpoint to avoid DRF content negotiation issues."""
     client_queue: queue.Queue = queue.Queue()
     _subscribers.append(client_queue)
 
     def event_stream():
-        # tell client to retry quickly on disconnect
         yield "retry: 2000\n\n"
         try:
             while True:
@@ -59,7 +59,6 @@ def fire_stream(request):
                     payload = json.dumps(event, ensure_ascii=False)
                     yield f"data: {payload}\n\n"
                 except queue.Empty:
-                    # keep-alive comment
                     yield ": keep-alive\n\n"
         finally:
             try:
@@ -69,7 +68,7 @@ def fire_stream(request):
 
     response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'  # for nginx, if any
+    response['X-Accel-Buffering'] = 'no'
     return response
 
 
@@ -157,27 +156,7 @@ def receive_fire(request):
         except Exception:
             pass
 
-        # broadcast WebSocket event via channels group
-        try:
-            channel_layer = get_channel_layer()
-            if channel_layer is not None:
-                async_to_sync(channel_layer.group_send)(
-                    'fires',
-                    {
-                        'type': 'fire.created',
-                        'event': {
-                            'type': 'fire_created',
-                            'id': instance.id,
-                            'session': instance.session_id,
-                            'location': instance.location,
-                            'time': instance.time.isoformat() if hasattr(instance.time, 'isoformat') else str(instance.time),
-                            'conf': instance.conf,
-                            'image': instance.image.url if getattr(instance, 'image', None) else '',
-                        }
-                    }
-                )
-        except Exception:
-            pass
+        # WebSocket broadcasting removed
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

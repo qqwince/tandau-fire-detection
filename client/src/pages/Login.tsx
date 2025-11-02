@@ -59,7 +59,7 @@ const Login = () => {
     }
 
     return (
-        <div className="mt-[150px] flex items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
+        <div className="mt-[150px] flex items-center justify-center">
             <div className="w-full max-w-md">
                 <div className="rounded-2xl border-2 border-gray-200 bg-white p-8 shadow-lg">
                     <div className="mb-8 text-center">
