@@ -696,7 +696,7 @@ const FireList = () => {
                 <section className="w-full max-w-7xl">
                     {isAuthenticated && (
                         <div className="animate-scale-in mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
-                            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:items-center">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                                 <div className="flex-1">
                                     <label className="mb-2 block text-sm font-semibold text-gray-700">
                                         Текущая сессия
