@@ -4,6 +4,11 @@ from datetime import datetime
 
 SITE_API_URL = "http://127.0.0.1:8000/api/fire/"  # адрес при локальной работе
 
+
+class FatalConfigError(Exception):
+    """Критическая ошибка конфигурации (неверный токен/сессия) — работу ИИ нужно остановить."""
+    pass
+
 # можно заранее задать координаты камер:
 CAMERA_COORDINATES = {
     "Камера №1": (53.279068, 69.3852623),  # МШГ №5
@@ -141,19 +146,31 @@ def send_to_site(image_path, location, conf):
         if token:
             headers["Authorization"] = f"Bearer {token}"
         else:
-            print("⚠️ Токен не найден. Установите переменную окружения FIRE_API_TOKEN или положите token.txt со значением токена рядом со скриптом.")
+            print("❌ Токен не найден. Установите FIRE_API_TOKEN / ACCESS_TOKEN или положите token.txt рядом со скриптом.")
+            raise FatalConfigError("Не настроен токен доступа для отправки данных на сайт.")
+
         if session_id is not None:
             data["session"] = session_id
         elif session_code:
             data["join_code"] = session_code
         else:
-            print("ℹ️ ID/код сессии не задан. Установите FIRE_SESSION_ID или FIRE_SESSION_CODE, либо создайте session.txt с числом (ID) или кодом (например ML6GW81a).")
+            print("❌ ID/код сессии не задан. Установите FIRE_SESSION_ID / FIRE_SESSION_CODE или создайте session.txt.")
+            raise FatalConfigError("Не задана сессия для привязки детекций.")
 
         response = requests.post(SITE_API_URL, data=data, files=files, headers=headers)
         if response.status_code == 201:
             print(f"✅ Данные и изображение с {location} отправлены на сайт.")
         else:
             print(f"❌ Ошибка отправки: {response.status_code} — {response.text}")
+            # Для ошибок авторизации / неверной сессии — останавливаем работу
+            if response.status_code in (400, 401, 403, 404):
+                raise FatalConfigError(
+                    f"Сервер отклонил запрос (код {response.status_code}). "
+                    f"Проверьте токен и код/ID сессии."
+                )
+    except FatalConfigError:
+        # Пробрасываем дальше, чтобы верхний уровень мог остановить работу
+        raise
     except Exception as e:
         print(f"❌ Ошибка соединения: {e}")
     finally:

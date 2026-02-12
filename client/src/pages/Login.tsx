@@ -15,10 +15,44 @@ const Login = () => {
     const { login, register } = useAuth()
     const navigate = useNavigate()
 
+    const validateForm = () => {
+        // базовая проверка email
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailPattern.test(email)) {
+            setError('Некорректный формат email')
+            return false
+        }
+
+        // общая проверка пароля
+        if (password.length < 8) {
+            setError('Пароль должен содержать минимум 8 символов')
+            return false
+        }
+        if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+            setError('Пароль должен содержать буквы и хотя бы одну цифру')
+            return false
+        }
+
+        if (!isLogin) {
+            if (password !== confirmPassword) {
+                setError('Пароли не совпадают')
+                return false
+            }
+        }
+
+        return true
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        setIsLoading(true)
         setError('')
+
+        // Клиентская валидация до запроса на сервер
+        if (!validateForm()) {
+            return
+        }
+
+        setIsLoading(true)
 
         try {
             if (isLogin) {
@@ -40,15 +74,34 @@ const Login = () => {
             }
             navigate('/fires')
         } catch (err: any) {
-            if (err.response?.data) {
-                if (typeof err.response.data === 'string') {
-                    setError(err.response.data)
-                } else if (err.response.data.detail) {
-                    setError(err.response.data.detail)
-                } else if (err.response.data.non_field_errors) {
-                    setError(err.response.data.non_field_errors[0])
+            const data = err.response?.data
+            if (data) {
+                if (typeof data === 'string') {
+                    setError(data)
+                } else if (data.detail) {
+                    setError(data.detail)
                 } else {
-                    setError('Произошла ошибка при аутентификации')
+                    const messages: string[] = []
+                    const collect = (field: string, label?: string) => {
+                        if (data[field]) {
+                            const raw = Array.isArray(data[field])
+                                ? data[field][0]
+                                : data[field]
+                            messages.push(label ? `${label}: ${raw}` : String(raw))
+                        }
+                    }
+                    collect('email', 'Email')
+                    collect('username', 'Логин')
+                    collect('password', 'Пароль')
+                    collect('password_confirm', 'Подтверждение пароля')
+                    if (data.non_field_errors) {
+                        collect('non_field_errors')
+                    }
+                    setError(
+                        messages.length
+                            ? messages.join('\n')
+                            : 'Произошла ошибка при аутентификации'
+                    )
                 }
             } else {
                 setError('Произошла ошибка при аутентификации')
@@ -73,7 +126,7 @@ const Login = () => {
                         </p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form onSubmit={handleSubmit} noValidate className="space-y-6">
                         {!isLogin && (
                             <>
                                 <div className="grid grid-cols-2 gap-4">
@@ -122,7 +175,6 @@ const Login = () => {
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                 required
-                                minLength={8}
                             />
                         </div>
 
@@ -137,14 +189,15 @@ const Login = () => {
                                     }
                                     className="w-full rounded-lg border border-gray-300 px-4 py-2 transition-all duration-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 focus:outline-none"
                                     required
-                                    minLength={8}
                                 />
                             </div>
                         )}
 
                         {error && (
                             <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                                <p className="text-sm text-red-600">{error}</p>
+                                <p className="whitespace-pre-line text-sm text-red-600">
+                                    {error}
+                                </p>
                             </div>
                         )}
 

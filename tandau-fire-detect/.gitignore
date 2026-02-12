@@ -1,4 +1,4 @@
-.fire_detections
+fire_detections/
 token.txt
 session.txt
 __pycache__/
@@ -11,3 +11,4 @@ ENV/
 .DS_Store
 Thumbs.db
 *.log
+model_v*.pt

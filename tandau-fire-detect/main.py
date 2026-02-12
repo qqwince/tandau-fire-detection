@@ -3,7 +3,7 @@ import os
 from ultralytics import YOLO
 import threading
 import time
-from site_sender import send_to_site, ensure_configuration_interactive
+from site_sender import send_to_site, ensure_configuration_interactive, FatalConfigError
 from ptz import start_ptz_sweeper_if_configured
 
 # Настройки оптимизации
@@ -177,6 +177,11 @@ def detect_fire_from_camera(camera_index, location_name):
 
             try:
                 send_to_site(filename, location_name, max_conf)
+            except FatalConfigError as e:
+                print(f"🛑 Критическая ошибка конфигурации при отправке на сайт: {e}")
+                # Останавливаем все камеры и завершаем программу
+                stop_all = True
+                break
             except Exception as e:
                 print(f"⚠️ Ошибка отправки на сайт: {e}")
         else:

@@ -21,6 +21,8 @@ const FireList = () => {
     const [loading, setLoading] = useState(true)
     const [hasLoaded, setHasLoaded] = useState(false)
     const [sessions, setSessions] = useState<Session[]>([])
+    const [showSessionCodes, setShowSessionCodes] = useState(false)
+    const [showCodeWarning, setShowCodeWarning] = useState(false)
     const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
     const [newSessionName, setNewSessionName] = useState('')
     const [joinCode, setJoinCode] = useState('')
@@ -134,7 +136,7 @@ const FireList = () => {
 
         const connectSSE = () => {
             try {
-                const streamUrl = `${base}/api/fires/stream/`
+                const streamUrl = `${base}api/fires/stream/`
                 es = new EventSource(streamUrl)
                 es.onopen = () => {
                     ;(window as any).__fires_sse_active = true
@@ -721,16 +723,47 @@ const FireList = () => {
                 }
             `}</style>
 
+            {showCodeWarning && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+                    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+                        <h3 className="mb-2 text-lg font-semibold text-gray-900">
+                            Показать код сессии?
+                        </h3>
+                        <p className="mb-4 text-sm text-gray-600">
+                            Код сессии — приватная информация. Не показывайте его на чужом экране
+                            и не делитесь им в скриншотах или трансляциях.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowCodeWarning(false)}
+                                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowCodeWarning(false)
+                                    setShowSessionCodes(true)
+                                }}
+                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                            >
+                                Показать код
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="animate-fade-in mt-[60px] flex justify-center px-4">
                 <section className="w-full max-w-7xl">
                     {isAuthenticated && (
                         <div className="animate-scale-in mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
-                            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:items-center">
                                 <div className="flex-1">
                                     <label className="mb-2 block text-sm font-semibold text-gray-700">
                                         Текущая сессия
                                     </label>
-                                    <div className="flex gap-3">
+                                    <div className="flex items-center gap-3">
                                         <select
                                             value={activeSessionId ?? ''}
                                             onChange={(e) =>
@@ -745,11 +778,24 @@ const FireList = () => {
                                             <option value="">Все сессии</option>
                                             {sessions.map((s) => (
                                                 <option key={s.id} value={s.id}>
-                                                    {s.name} — код:{' '}
-                                                    {s.join_code}
+                                                    {s.name}
                                                 </option>
                                             ))}
                                         </select>
+                                        <button
+                                            onClick={() => {
+                                                if (!showSessionCodes) {
+                                                    setShowCodeWarning(true)
+                                                } else {
+                                                    setShowSessionCodes(false)
+                                                }
+                                            }}
+                                            className="rounded-lg border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
+                                        >
+                                            {showSessionCodes
+                                                ? 'Скрыть коды'
+                                                : 'Показать код сессии'}
+                                        </button>
                                         <button
                                             onClick={() =>
                                                 setShowAdminPanel((v) => !v)
@@ -761,6 +807,16 @@ const FireList = () => {
                                                 : 'Заявки'}
                                         </button>
                                     </div>
+                                        <div className="mt-2 text-xs text-gray-600">
+                                            Код выбранной сессии:{' '}
+                                            {showSessionCodes && activeSessionId && (
+                                            <span className="font-mono font-semibold">
+                                                {sessions.find((s) => s.id === activeSessionId)?.join_code ??
+                                                    '—'}
+                                            </span>
+                                            )}
+                                        </div>
+                                    
                                 </div>
                                 <div className="flex-1">
                                     <label className="mb-2 block text-sm font-semibold text-gray-700">
