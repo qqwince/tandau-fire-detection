@@ -896,28 +896,6 @@ const FireList = () => {
                                     📍 Локация
                                 </h3>
 
-                                {/* Один ползунок для минимальной точности детекции */}
-                                <div className="mb-4 flex flex-col gap-1">
-                                    <span className="text-xs text-gray-500">
-                                        Мин. точность детекции: {filters.confMin}%
-                                    </span>
-                                    <input
-                                        type="range"
-                                        min={0}
-                                        max={100}
-                                        value={filters.confMin}
-                                        onChange={(e) =>
-                                            updateFilters({
-                                                confMin: Math.min(
-                                                    Number(e.target.value),
-                                                    filters.confMax
-                                                ),
-                                            })
-                                        }
-                                        className="h-1 w-full cursor-pointer accent-red-500"
-                                    />
-                                </div>
-
                                 <div className="max-h-32 space-y-2 overflow-hidden overflow-y-auto">
                                     {locations.map((location, index) => (
                                         <label
@@ -946,11 +924,32 @@ const FireList = () => {
                             </div>
 
                             {/* Фильтр по confidence */}
-                            <div className="animate-slide-up stagger-2">
+                            <div className="animate-slide-up stagger-2 ">
                                 <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-gray-800">
                                     🎯 Точность детекции
                                 </h3>
-                                <div className="flex flex-wrap items-center gap-4">
+                                <div className="flex flex-wrap items-center grid-cols-2 gap-4">
+                                    {/* Один ползунок для минимальной точности детекции */}
+                                    <div className="mb-4 flex w-[60%] flex-col gap-1">
+                                        <span className="text-xs text-gray-500">
+                                            Мин. точность детекции:
+                                        </span>
+                                        <input
+                                            type="range"
+                                            min={0}
+                                            max={100}
+                                            value={filters.confMin}
+                                            onChange={(e) =>
+                                                updateFilters({
+                                                    confMin: Math.min(
+                                                        Number(e.target.value),
+                                                        filters.confMax
+                                                    ),
+                                                })
+                                            }
+                                            className="h-1 w-full cursor-pointer accent-red-500"
+                                        />
+                                    </div>
                                     <label className="flex items-center gap-2">
                                         <span className="text-sm font-medium">
                                             От:
