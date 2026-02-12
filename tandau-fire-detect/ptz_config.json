@@ -6,10 +6,10 @@
       "pause_seconds": 2,
       "sweep_cycles": 0,
       "onvif": {
-        "host": "192.168.100.60",
-        "port": 80,
+        "host": "192.168.100.175",
+        "port": 554,
         "username": "admin",
-        "password": "Amirhan1181111811",
+        "password": "L238872B",
         "pan_speed": 0.4,
         "tilt_speed": 0.0,
         "timeout": 1.0,

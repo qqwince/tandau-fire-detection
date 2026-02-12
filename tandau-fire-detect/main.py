@@ -5,10 +5,11 @@ import threading
 import time
 from site_sender import send_to_site, ensure_configuration_interactive, FatalConfigError
 from ptz import start_ptz_sweeper_if_configured
+from telegram_sender import send_telegram_photo
 
 # Настройки оптимизации
 CONFIG = {
-    'skip_frames': True,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
+    'skip_frames': False,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
     'reduce_quality': True,  # Включить/выключить понижение качества
     'quality_scale': 0.5,  # Масштаб качества (0.5 = 50% от оригинала)
     'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
@@ -184,6 +185,11 @@ def detect_fire_from_camera(camera_index, location_name):
                 break
             except Exception as e:
                 print(f"⚠️ Ошибка отправки на сайт: {e}")
+            
+            try:
+                send_telegram_photo(filename)
+            except Exception as e:
+                print(f"⚠️ Ошибка отправки в Telegram: {e}")
         else:
             display_frame = frame
 
@@ -259,10 +265,10 @@ if __name__ == "__main__":
 
     # Список камер
     cameras = [
-        # (0, "Камера №1"),
-        # (1, "Камера №2"),
+        #(0, "Камера №1"),
+        #(1, "Камера №2"),
         ("./fire1.mp4", "Камера №3"),
-        # ("rtsp://admin:Amirhan1181111811@192.168.100.60:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
+        #("rtsp://admin:L238872B@192.168.100.175:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
     ]
 
     threads = []

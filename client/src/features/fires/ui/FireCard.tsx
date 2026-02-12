@@ -1,5 +1,5 @@
 import React from 'react'
-import { FireSite } from '../types'
+import type { FireSite } from '../types'
 
 interface Props {
     site: FireSite
@@ -10,6 +10,7 @@ interface Props {
 }
 
 export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animating, onToggleApprove }) => {
+    const base = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
     return (
         <div
             className={`animate-slide-up overflow-hidden rounded-2xl border shadow-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${
@@ -20,10 +21,10 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
                 {site.image && (
                     <div className="flex-shrink-0 lg:w-80 xl:w-96">
                         <img
-                            src={`${import.meta.env.VITE_API_URL}${site.image}`}
+                            src={`${base}${site.image}`}
                             alt="Изображение пожара"
                             className="h-64 w-full cursor-pointer object-cover transition-all duration-300 hover:scale-105 hover:opacity-90 lg:h-full"
-                            onClick={() => onOpenImage(`${import.meta.env.VITE_API_URL}${site.image}`)}
+                            onClick={() => onOpenImage(`${base}${site.image}`)}
                         />
                     </div>
                 )}

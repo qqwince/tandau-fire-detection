@@ -41,7 +41,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
-    'channels',
     'fires',
 ]
 
@@ -161,12 +160,7 @@ CORS_ALLOW_HEADERS = [
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Channels in-memory layer (sufficient for single-process dev usage)
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    }
-}
+# WebSockets disabled; using plain HTTP + SSE
 
 # REST Framework settings
 REST_FRAMEWORK = {

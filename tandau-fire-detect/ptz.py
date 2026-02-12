@@ -19,13 +19,40 @@ class PTZController:
         self.right_url: Optional[str] = config.get("right_url")
         self.stop_url: Optional[str] = config.get("stop_url")
         self.timeout: float = float(config.get("timeout", 3))
+        # optional HTTP auth
+        self.http_user: Optional[str] = config.get("http_user")
+        self.http_password: Optional[str] = config.get("http_password")
+        self.http_auth_type: str = str(config.get("http_auth", "none")).lower()
+        self.insecure_tls: bool = bool(config.get("insecure_tls", False))
 
     def _call(self, url: Optional[str]) -> None:
         if not url:
             return
         try:
             print(f"[PTZ] {self.name}: GET {url}")
-            requests.get(url, timeout=self.timeout)
+            auth = None
+            if self.http_auth_type in ("basic", "digest") and self.http_user and self.http_password:
+                try:
+                    from requests.auth import HTTPBasicAuth, HTTPDigestAuth  # type: ignore
+                    auth = HTTPDigestAuth(self.http_user, self.http_password) if self.http_auth_type == "digest" else HTTPBasicAuth(self.http_user, self.http_password)
+                except Exception:
+                    auth = None
+            kwargs = {
+                "timeout": self.timeout,
+                "auth": auth,
+                "allow_redirects": True,
+            }
+            if url.startswith("https://") and self.insecure_tls:
+                kwargs["verify"] = False
+            resp = requests.get(url, **kwargs)
+            try:
+                info = f"status={resp.status_code}"
+                if resp.status_code in (401, 403):
+                    wa = resp.headers.get('WWW-Authenticate', '')
+                    info += f" auth_hint={wa[:80]}"
+                print(f"[PTZ] {self.name}: response {info}")
+            except Exception:
+                pass
         except Exception as e:
             # Не роняем поток при ошибке PTZ
             print(f"[PTZ] {self.name}: ошибка PTZ-запроса: {e}")

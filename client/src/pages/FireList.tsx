@@ -66,73 +66,13 @@ const FireList = () => {
         loadSites(true)
     }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
 
-    // Live updates via WebSocket with SSE/polling fallback
+    // Live updates via SSE (stable) with polling fallback
     useEffect(() => {
-        const base = import.meta.env.VITE_API_URL
+        const base = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
         if (!base) return
 
-        let ws: WebSocket | null = null
         let es: EventSource | null = null
         ;(window as any).__fires_sse_active = false
-
-        const connectWebSocket = () => {
-            try {
-                const wsUrl = base.replace(/^http/, 'ws') + '/ws/fires/'
-                ws = new WebSocket(wsUrl)
-                ws.onopen = () => {
-                    ;(window as any).__fires_ws_active = true
-                }
-                ws.onmessage = (ev) => {
-                    try {
-                        const msg = JSON.parse(ev.data)
-                        if (msg?.type === 'fire_created') {
-                            const newItem = {
-                                id: String(msg.id),
-                                location: msg.location,
-                                time: msg.time,
-                                description: `Автоматическое обнаружение на ${msg.location}`,
-                                latitude: Number(msg.latitude ?? 0),
-                                longitude: Number(msg.longitude ?? 0),
-                                image: msg.image || '',
-                                conf: Number(msg.conf ?? 0),
-                            } as FireSite
-
-                            const locationOk =
-                                filters.selectedLocations.length === 0 ||
-                                filters.selectedLocations.includes(newItem.location)
-                            const confOk =
-                                Math.round(newItem.conf) >= filters.confMin &&
-                                Math.round(newItem.conf) <= filters.confMax
-                            const sessionOk =
-                                !activeSessionId || Number(msg.session) === activeSessionId
-
-                            if (locationOk && confOk && sessionOk) {
-                                setSites((prev) => {
-                                    const exists = prev.some((s) => s.id === newItem.id)
-                                    if (exists) return prev
-                                    const merged = [newItem, ...prev]
-                                    return merged.slice(0, pagination.pageSize)
-                                })
-                                setPagination((prev) => ({
-                                    ...prev,
-                                    totalCount: prev.totalCount + 1,
-                                }))
-                            }
-                        }
-                    } catch {}
-                }
-                ws.onerror = () => {
-                    ;(window as any).__fires_ws_active = false
-                }
-                ws.onclose = () => {
-                    ;(window as any).__fires_ws_active = false
-                    // fallback to SSE if WS closes
-                    connectSSE()
-                }
-            } catch {
-                connectSSE()
-            }
-        }
 
         const connectSSE = () => {
             try {
@@ -188,10 +128,9 @@ const FireList = () => {
             }
         }
 
-        connectWebSocket()
+        connectSSE()
 
         return () => {
-            try { ws && ws.close() } catch {}
             try { es && es.close() } catch {}
         }
     }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
@@ -199,9 +138,8 @@ const FireList = () => {
     // Background polling only if both WS and SSE are down
     useEffect(() => {
         const interval = setInterval(() => {
-            const wsActive = (window as any).__fires_ws_active
             const sseActive = (window as any).__fires_sse_active
-            if (!wsActive && !sseActive) {
+            if (!sseActive) {
                 loadSites()
             }
         }, 15000)
@@ -556,7 +494,7 @@ const FireList = () => {
 
     if (!hasLoaded && loading) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
+            <div className="flex min-h-screen items-center justify-center">
                 <div className="animate-fade-in text-center">
                     <div className="mb-4 animate-bounce text-6xl">🔥</div>
                     <p className="animate-pulse text-2xl font-bold text-gray-700">
@@ -571,7 +509,7 @@ const FireList = () => {
     const locations = Array.from(new Set(sites.map((site) => site.location)))
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-orange-50 via-red-50 to-yellow-50">
+        <div className="min-h-screen">
             <style>{`
                 @keyframes fadeIn {
                     from {
@@ -1185,13 +1123,9 @@ const FireList = () => {
                                                         <p className="text-sm text-gray-500">
                                                             Время обнаружения
                                                         </p>
-                                                        <p className="font-medium">
-                                                            {new Date(
-                                                                site.time
-                                                            ).toLocaleString(
-                                                                'ru-RU'
-                                                            )}
-                                                        </p>
+                                                            <p className="font-medium">
+                                                            {new Date(site.time).toLocaleString('kz-KZ', { timeZone: 'UTC' })}
+                                                            </p>
                                                     </div>
                                                 </div>
 
