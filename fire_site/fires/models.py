@@ -30,6 +30,27 @@ class Membership(models.Model):
         return f"{self.user.username} in {self.session.name} as {self.role}"
 
 
+class SessionAuditLog(models.Model):
+    ACTION_CHOICES = (
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+        ('blocked', 'Blocked'),
+        ('unblocked', 'Unblocked'),
+        ('removed', 'Removed'),
+    )
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='audit_logs')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_actions')
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    target_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_targeted')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:
+        return f"{self.actor_id} {self.action} {self.target_user_id} in session {self.session_id}"
+
+
 class JoinRequest(models.Model):
     STATUS_CHOICES = (
         ('pending', 'Pending'),

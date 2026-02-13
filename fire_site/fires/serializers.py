@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from .models import Fire, Session, Membership, JoinRequest
+from .models import Fire, Session, Membership, JoinRequest, SessionAuditLog
 
 class FireSerializer(serializers.ModelSerializer):
     class Meta:
@@ -29,11 +29,42 @@ class MembershipSerializer(serializers.ModelSerializer):
 
 class JoinRequestSerializer(serializers.ModelSerializer):
     requester_username = serializers.ReadOnlyField(source='requester.username')
+    requester_first_name = serializers.ReadOnlyField(source='requester.first_name')
+    requester_last_name = serializers.ReadOnlyField(source='requester.last_name')
+    requester_email = serializers.ReadOnlyField(source='requester.email')
 
     class Meta:
         model = JoinRequest
-        fields = ('id', 'session', 'requester', 'requester_username', 'status', 'created_at', 'updated_at')
+        fields = (
+            'id',
+            'session',
+            'requester',
+            'requester_username',
+            'requester_first_name',
+            'requester_last_name',
+            'requester_email',
+            'status',
+            'created_at',
+            'updated_at',
+        )
         read_only_fields = ('requester', 'status', 'created_at', 'updated_at')
+
+
+class SessionAuditLogSerializer(serializers.ModelSerializer):
+    actor_username = serializers.SerializerMethodField()
+    target_username = serializers.SerializerMethodField()
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+
+    class Meta:
+        model = SessionAuditLog
+        fields = ('id', 'session', 'actor', 'actor_username', 'action', 'action_display', 'target_user', 'target_username', 'created_at')
+
+    def get_actor_username(self, obj):
+        return obj.actor.username if obj.actor else None
+
+    def get_target_username(self, obj):
+        return obj.target_user.username if obj.target_user else None
+
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)

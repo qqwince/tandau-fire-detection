@@ -4,6 +4,7 @@ from .views import (
     register_user, login_user, refresh_token, get_user_profile,
     create_session, my_sessions, request_join_by_code,
     pending_requests_for_session, approve_request, deny_request, block_requester,
+    unblock_user, session_members, session_blocked, session_audit_log,
     fire_stream,
 )
 
@@ -29,4 +30,8 @@ urlpatterns = [
     path('api/requests/<int:request_id>/approve/', approve_request, name='approve_request'),   # POST approve
     path('api/requests/<int:request_id>/deny/', deny_request, name='deny_request'),            # POST deny
     path('api/sessions/<int:session_id>/block/<int:user_id>/', block_requester, name='block_requester'), # POST block
+    path('api/sessions/<int:session_id>/unblock/<int:user_id>/', unblock_user, name='unblock_user'),
+    path('api/sessions/<int:session_id>/members/', session_members, name='session_members'),
+    path('api/sessions/<int:session_id>/blocked/', session_blocked, name='session_blocked'),
+    path('api/sessions/<int:session_id>/audit-log/', session_audit_log, name='session_audit_log'),
 ]

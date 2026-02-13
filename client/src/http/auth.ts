@@ -49,6 +49,9 @@ export interface JoinRequest {
     session: number
     requester: number
     requester_username: string
+    requester_first_name?: string
+    requester_last_name?: string
+    requester_email?: string
     status: 'pending' | 'approved' | 'denied' | 'blocked'
     created_at: string
     updated_at: string
@@ -113,5 +116,47 @@ export const denyRequest = async (requestId: number): Promise<JoinRequest> => {
 
 export const blockRequester = async (sessionId: number, userId: number): Promise<JoinRequest> => {
     const { data } = await $host.post(`/api/sessions/${sessionId}/block/${userId}/`)
+    return data
+}
+
+export const unblockUser = async (sessionId: number, userId: number): Promise<{ status: string }> => {
+    const { data } = await $host.post(`/api/sessions/${sessionId}/unblock/${userId}/`)
+    return data
+}
+
+export interface SessionMember {
+    id: number
+    user: number
+    username: string
+    session: number
+    role: 'admin' | 'member'
+    is_active: boolean
+    created_at: string
+}
+
+export const getSessionMembers = async (sessionId: number): Promise<SessionMember[]> => {
+    const { data } = await $host.get(`/api/sessions/${sessionId}/members/`)
+    return data
+}
+
+export const getSessionBlocked = async (sessionId: number): Promise<JoinRequest[]> => {
+    const { data } = await $host.get(`/api/sessions/${sessionId}/blocked/`)
+    return data
+}
+
+export interface AuditLogEntry {
+    id: number
+    session: number
+    actor: number | null
+    actor_username: string
+    action: 'approved' | 'denied' | 'blocked' | 'unblocked' | 'removed'
+    action_display: string
+    target_user: number | null
+    target_username: string
+    created_at: string
+}
+
+export const getSessionAuditLog = async (sessionId: number): Promise<AuditLogEntry[]> => {
+    const { data } = await $host.get(`/api/sessions/${sessionId}/audit-log/`)
     return data
 }

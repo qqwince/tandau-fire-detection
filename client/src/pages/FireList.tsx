@@ -10,7 +10,13 @@ import {
     approveRequest as approveRequestApi,
     denyRequest as denyRequestApi,
     blockRequester as blockRequesterApi,
+    unblockUser as unblockUserApi,
+    getSessionMembers,
+    getSessionBlocked,
+    getSessionAuditLog,
     type JoinRequest,
+    type SessionMember,
+    type AuditLogEntry,
 } from '../http/auth.ts'
 
 import { type FireSite, type Filters, type ImagePosition, type SortField, type SortOrder } from '../features/fires/types'
@@ -22,13 +28,20 @@ const FireList = () => {
     const [hasLoaded, setHasLoaded] = useState(false)
     const [sessions, setSessions] = useState<Session[]>([])
     const [showSessionCodes, setShowSessionCodes] = useState(false)
-    const [showCodeWarning, setShowCodeWarning] = useState(false)
+    const [codeConfirmPending, setCodeConfirmPending] = useState(false)
+    const [codeConfirmCountdown, setCodeConfirmCountdown] = useState(0)
     const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
     const [newSessionName, setNewSessionName] = useState('')
     const [joinCode, setJoinCode] = useState('')
     const [joinMessage, setJoinMessage] = useState<string | null>(null)
     const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([])
-    const [showAdminPanel, setShowAdminPanel] = useState(false)
+    const [showManageModal, setShowManageModal] = useState(false)
+    const [manageTab, setManageTab] = useState<'code' | 'requests' | 'blocked' | 'members' | 'logs'>('code')
+    const [manageMembers, setManageMembers] = useState<SessionMember[]>([])
+    const [manageBlocked, setManageBlocked] = useState<JoinRequest[]>([])
+    const [manageLogs, setManageLogs] = useState<AuditLogEntry[]>([])
+    const [manageLoading, setManageLoading] = useState(false)
+    const [manageError, setManageError] = useState<string | null>(null)
     const [selectedImage, setSelectedImage] = useState<string | null>(null)
     const [imageScale, setImageScale] = useState(1)
     const [imagePosition, setImagePosition] = useState<ImagePosition>({
@@ -155,13 +168,35 @@ const FireList = () => {
         }
     }, [isAuthenticated])
 
+    // Периодически обновляем список сессий, чтобы новые приглашения
+    // появлялись без перезагрузки страницы
     useEffect(() => {
-        if (isAuthenticated && activeSessionId && showAdminPanel) {
-            loadPendingRequests(activeSessionId)
-        } else {
+        if (!isAuthenticated) return
+        const interval = setInterval(() => {
+            loadSessions()
+        }, 15000)
+        return () => clearInterval(interval)
+    }, [isAuthenticated])
+
+    useEffect(() => {
+        if (!isAuthenticated || !activeSessionId) {
             setPendingRequests([])
         }
-    }, [isAuthenticated, activeSessionId, showAdminPanel])
+    }, [isAuthenticated, activeSessionId])
+
+    // Таймер подтверждения показа кода (3 сек)
+    useEffect(() => {
+        if (!showManageModal || manageTab !== 'code') {
+            setCodeConfirmPending(false)
+            setCodeConfirmCountdown(0)
+            return
+        }
+        if (!codeConfirmPending || codeConfirmCountdown <= 0) return
+        const t = setInterval(() => {
+            setCodeConfirmCountdown((c) => (c <= 1 ? 0 : c - 1))
+        }, 1000)
+        return () => clearInterval(t)
+    }, [showManageModal, manageTab, codeConfirmPending, codeConfirmCountdown])
 
     // Keyboard and mouse event handlers for image modal
     useEffect(() => {
@@ -295,11 +330,12 @@ const FireList = () => {
 
     const loadSessions = async () => {
         try {
-            const list = await getMySessions()
+            const list = (await getMySessions()).sort((a, b) => a.id - b.id)
             setSessions(list)
-            if (!activeSessionId && list.length > 0) {
-                setActiveSessionId(list[0].id)
-            }
+            setActiveSessionId((prev) => {
+                if (prev != null && list.some((s) => s.id === prev)) return prev
+                return list.length > 0 ? list[0].id : null
+            })
         } catch (e) {
             console.error('Ошибка загрузки сессий:', e)
         }
@@ -344,7 +380,10 @@ const FireList = () => {
     const approveRequest = async (id: number) => {
         try {
             await approveRequestApi(id)
-            if (activeSessionId) loadPendingRequests(activeSessionId)
+            if (activeSessionId) {
+                loadPendingRequests(activeSessionId)
+                if (showManageModal) loadManageData()
+            }
         } catch (e) {
             console.error('Ошибка утверждения:', e)
         }
@@ -353,7 +392,10 @@ const FireList = () => {
     const denyRequest = async (id: number) => {
         try {
             await denyRequestApi(id)
-            if (activeSessionId) loadPendingRequests(activeSessionId)
+            if (activeSessionId) {
+                loadPendingRequests(activeSessionId)
+                if (showManageModal) loadManageData()
+            }
         } catch (e) {
             console.error('Ошибка отклонения:', e)
         }
@@ -364,8 +406,47 @@ const FireList = () => {
             if (!activeSessionId) return
             await blockRequesterApi(activeSessionId, userId)
             loadPendingRequests(activeSessionId)
+            if (showManageModal) loadManageData()
         } catch (e) {
             console.error('Ошибка блокировки:', e)
+        }
+    }
+
+    const loadManageData = async () => {
+        if (!activeSessionId) return
+        setManageLoading(true)
+        setManageError(null)
+        try {
+            const [members, blocked, logs] = await Promise.all([
+                getSessionMembers(activeSessionId),
+                getSessionBlocked(activeSessionId),
+                getSessionAuditLog(activeSessionId),
+            ])
+            setManageMembers(members)
+            setManageBlocked(blocked)
+            setManageLogs(logs)
+        } catch (e: unknown) {
+            const err = e as { response?: { status?: number } }
+            setManageError(err?.response?.status === 403 ? 'Нет доступа. Только администраторы сессии могут просматривать.' : 'Ошибка загрузки данных')
+        } finally {
+            setManageLoading(false)
+        }
+    }
+
+    const openManageModal = () => {
+        setShowManageModal(true)
+        setManageTab('code')
+        loadManageData()
+        if (activeSessionId) loadPendingRequests(activeSessionId)
+    }
+
+    const unblockUser = async (userId: number) => {
+        try {
+            if (!activeSessionId) return
+            await unblockUserApi(activeSessionId, userId)
+            loadManageData()
+        } catch (e) {
+            console.error('Ошибка разблокировки:', e)
         }
     }
 
@@ -661,39 +742,29 @@ const FireList = () => {
                 }
             `}</style>
 
-            {showCodeWarning && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-                    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-                        <h3 className="mb-2 text-lg font-semibold text-gray-900">
-                            Показать код сессии?
-                        </h3>
-                        <p className="mb-4 text-sm text-gray-600">
-                            Код сессии — приватная информация. Не показывайте его на чужом экране
-                            и не делитесь им в скриншотах или трансляциях.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowCodeWarning(false)}
-                                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                                Отмена
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setShowCodeWarning(false)
-                                    setShowSessionCodes(true)
-                                }}
-                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-                            >
-                                Показать код
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <div className="animate-fade-in mt-[60px] flex justify-center px-4">
                 <section className="w-full max-w-7xl">
+                    <div className="animate-slide-up mb-8 text-center">
+                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold">
+                            🔥 Мониторинг пожаров
+                        </h2>
+                        <p className="text-gray-600">
+                            Показано{' '}
+                            <span className="font-semibold text-red-600">
+                                {sites.length}
+                            </span>{' '}
+                            из {pagination.totalCount} активных очагов
+                            {approvedSites.size > 0 && (
+                                <span className="ml-2">
+                                    •{' '}
+                                    <span className="font-semibold text-green-600">
+                                        {approvedSites.size}
+                                    </span>{' '}
+                                    подтверждено
+                                </span>
+                            )}
+                        </p>
+                    </div>
                     {isAuthenticated && (
                         <div className="animate-scale-in mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-lg">
                             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -720,40 +791,15 @@ const FireList = () => {
                                                 </option>
                                             ))}
                                         </select>
-                                        <button
-                                            onClick={() => {
-                                                if (!showSessionCodes) {
-                                                    setShowCodeWarning(true)
-                                                } else {
-                                                    setShowSessionCodes(false)
-                                                }
-                                            }}
-                                            className="rounded-lg border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
-                                        >
-                                            {showSessionCodes
-                                                ? 'Скрыть коды'
-                                                : 'Показать код сессии'}
-                                        </button>
-                                        <button
-                                            onClick={() =>
-                                                setShowAdminPanel((v) => !v)
-                                            }
-                                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-                                        >
-                                            {showAdminPanel
-                                                ? 'Скрыть заявки'
-                                                : 'Заявки'}
-                                        </button>
+                                        {activeSessionId && (
+                                            <button
+                                                onClick={openManageModal}
+                                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+                                            >
+                                                Управление
+                                            </button>
+                                        )}
                                     </div>
-                                        <div className="mt-2 text-xs text-gray-600">
-                                            Код выбранной сессии:{' '}
-                                            {showSessionCodes && activeSessionId && (
-                                            <span className="font-mono font-semibold">
-                                                {sessions.find((s) => s.id === activeSessionId)?.join_code ??
-                                                    '—'}
-                                            </span>
-                                            )}
-                                        </div>
                                     
                                 </div>
                                 <div className="flex-1">
@@ -806,86 +852,9 @@ const FireList = () => {
                                     )}
                                 </div>
                             </div>
-                            {showAdminPanel && activeSessionId && (
-                                <div className="mt-6 rounded-lg border border-gray-200 p-4">
-                                    <div className="mb-3 text-sm font-semibold text-gray-800">
-                                        Ожидающие заявки
-                                    </div>
-                                    {pendingRequests.length === 0 ? (
-                                        <p className="text-sm text-gray-500">
-                                            Нет заявок
-                                        </p>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {pendingRequests.map((r) => (
-                                                <div
-                                                    key={r.id}
-                                                    className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2"
-                                                >
-                                                    <div className="text-sm">
-                                                        {r.requester_username}
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={() =>
-                                                                approveRequest(
-                                                                    r.id
-                                                                )
-                                                            }
-                                                            className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
-                                                        >
-                                                            Принять
-                                                        </button>
-                                                        <button
-                                                            onClick={() =>
-                                                                denyRequest(
-                                                                    r.id
-                                                                )
-                                                            }
-                                                            className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700"
-                                                        >
-                                                            Отклонить
-                                                        </button>
-                                                        <button
-                                                            onClick={() =>
-                                                                blockRequester(
-                                                                    r.requester
-                                                                )
-                                                            }
-                                                            className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
-                                                        >
-                                                            Заблокировать
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     )}
-                    <div className="animate-slide-up mb-8 text-center">
-                        <h2 className="mb-2 bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-3xl font-bold">
-                            🔥 Мониторинг пожаров
-                        </h2>
-                        <p className="text-gray-600">
-                            Показано{' '}
-                            <span className="font-semibold text-red-600">
-                                {sites.length}
-                            </span>{' '}
-                            из {pagination.totalCount} активных очагов
-                            {approvedSites.size > 0 && (
-                                <span className="ml-2">
-                                    •{' '}
-                                    <span className="font-semibold text-green-600">
-                                        {approvedSites.size}
-                                    </span>{' '}
-                                    подтверждено
-                                </span>
-                            )}
-                        </p>
-                    </div>
+                    
 
                     {/* Панель фильтров */}
                     <div className="animate-scale-in mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-lg transition-all duration-300 hover:shadow-xl">
@@ -928,9 +897,9 @@ const FireList = () => {
                                 <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-gray-800">
                                     🎯 Точность детекции
                                 </h3>
-                                <div className="flex flex-wrap items-center grid-cols-2 gap-4">
-                                    {/* Один ползунок для минимальной точности детекции */}
-                                    <div className="mb-4 flex w-[60%] flex-col gap-1">
+                                <div className="flex flex-col gap-4">
+                                    {/* Ползунок для минимальной точности детекции */}
+                                    <div className="flex flex-col gap-1">
                                         <span className="text-xs text-gray-500">
                                             Мин. точность детекции:
                                         </span>
@@ -950,52 +919,55 @@ const FireList = () => {
                                             className="h-1 w-full cursor-pointer accent-red-500"
                                         />
                                     </div>
-                                    <label className="flex items-center gap-2">
-                                        <span className="text-sm font-medium">
-                                            От:
-                                        </span>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            max="100"
-                                            value={filters.confMin}
-                                            onChange={(e) =>
-                                                updateFilters({
-                                                    confMin: Math.max(
-                                                        0,
-                                                        Number(e.target.value)
-                                                    ),
-                                                })
-                                            }
-                                            className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center transition-all duration-200 focus:scale-105 focus:border-red-500 focus:outline-none"
-                                        />
-                                        <span className="text-sm text-gray-600">
-                                            %
-                                        </span>
-                                    </label>
-                                    <label className="flex items-center gap-2">
-                                        <span className="text-sm font-medium">
-                                            До:
-                                        </span>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            max="100"
-                                            value={filters.confMax}
-                                            onChange={(e) =>
-                                                updateFilters({
-                                                    confMax: Math.min(
-                                                        100,
-                                                        Number(e.target.value)
-                                                    ),
-                                                })
-                                            }
-                                            className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center transition-all duration-200 focus:scale-105 focus:border-red-500 focus:outline-none"
-                                        />
-                                        <span className="text-sm text-gray-600">
-                                            %
-                                        </span>
-                                    </label>
+                                    {/* Два input в одной строке */}
+                                    <div className="flex items-center gap-4">
+                                        <label className="flex items-center gap-2">
+                                            <span className="text-sm font-medium">
+                                                От:
+                                            </span>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max="100"
+                                                value={filters.confMin}
+                                                onChange={(e) =>
+                                                    updateFilters({
+                                                        confMin: Math.max(
+                                                            0,
+                                                            Number(e.target.value)
+                                                        ),
+                                                    })
+                                                }
+                                                className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center transition-all duration-200 focus:scale-105 focus:border-red-500 focus:outline-none"
+                                            />
+                                            <span className="text-sm text-gray-600">
+                                                %
+                                            </span>
+                                        </label>
+                                        <label className="flex items-center gap-2">
+                                            <span className="text-sm font-medium">
+                                                До:
+                                            </span>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max="100"
+                                                value={filters.confMax}
+                                                onChange={(e) =>
+                                                    updateFilters({
+                                                        confMax: Math.min(
+                                                            100,
+                                                            Number(e.target.value)
+                                                        ),
+                                                    })
+                                                }
+                                                className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-center transition-all duration-200 focus:scale-105 focus:border-red-500 focus:outline-none"
+                                            />
+                                            <span className="text-sm text-gray-600">
+                                                %
+                                            </span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1524,6 +1496,251 @@ const FireList = () => {
                                         </kbd>{' '}
                                         - закрыть
                                     </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Модалка управления сессией */}
+                    {showManageModal && (
+                        <div
+                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                            onClick={() => setShowManageModal(false)}
+                        >
+                            <div
+                                className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                                    <h3 className="text-lg font-semibold text-gray-800">
+                                        Управление сессией
+                                    </h3>
+                                    <button
+                                        onClick={() => setShowManageModal(false)}
+                                        className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                    >
+                                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div className="border-b border-gray-100">
+                                    <div className="flex flex-wrap gap-1 px-4">
+                                        {(['code', 'requests', 'blocked', 'members', 'logs'] as const).map((tab) => (
+                                            <button
+                                                key={tab}
+                                                onClick={() => setManageTab(tab)}
+                                                className={`rounded-t-lg px-3 py-2 text-sm font-medium transition-colors ${
+                                                    manageTab === tab
+                                                        ? 'border-b-2 border-red-600 text-red-600'
+                                                        : 'text-gray-600 hover:text-gray-800'
+                                                }`}
+                                            >
+                                                {tab === 'code' && 'Код'}
+                                                {tab === 'requests' && 'Заявки'}
+                                                {tab === 'blocked' && 'Заблокированные'}
+                                                {tab === 'members' && 'Участники'}
+                                                {tab === 'logs' && 'Лог'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="max-h-[60vh] overflow-y-auto p-4">
+                                    {manageTab === 'code' ? (
+                                        <div className="space-y-3 py-2">
+                                            <p className="text-sm text-gray-600">
+                                                Код сессии — приватная информация. Не показывайте его на чужом экране.
+                                            </p>
+                                            {showSessionCodes && activeSessionId ? (
+                                                <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                                                    <span className="font-mono text-lg font-semibold text-gray-800">
+                                                        {sessions.find((s) => s.id === activeSessionId)?.join_code ?? '—'}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => setShowSessionCodes(false)}
+                                                        className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-200"
+                                                    >
+                                                        Скрыть
+                                                    </button>
+                                                </div>
+                                            ) : codeConfirmPending ? (
+                                                <div className="flex flex-wrap items-center gap-3">
+                                                    <button
+                                                        disabled={codeConfirmCountdown > 0}
+                                                        onClick={() => {
+                                                            setShowSessionCodes(true)
+                                                            setCodeConfirmPending(false)
+                                                            setCodeConfirmCountdown(0)
+                                                        }}
+                                                        className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                                                            codeConfirmCountdown > 0
+                                                                ? 'cursor-not-allowed border border-gray-300 bg-gray-100 text-gray-500'
+                                                                : 'border border-red-600 bg-red-600 text-white hover:bg-red-700'
+                                                        }`}
+                                                    >
+                                                        Вы уверены?
+                                                        {codeConfirmCountdown > 0 && ` (${codeConfirmCountdown} сек)`}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setCodeConfirmPending(false)
+                                                            setCodeConfirmCountdown(0)
+                                                        }}
+                                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                                                    >
+                                                        Отмена
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => {
+                                                        setCodeConfirmPending(true)
+                                                        setCodeConfirmCountdown(3)
+                                                    }}
+                                                    className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50"
+                                                >
+                                                    Показать код
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : manageTab === 'requests' ? (
+                                        <div className="space-y-2 py-2">
+                                            <p className="mb-2 text-sm font-semibold text-gray-800">
+                                                Ожидающие заявки
+                                            </p>
+                                            {pendingRequests.length === 0 ? (
+                                                <p className="py-4 text-center text-gray-500">Нет заявок</p>
+                                            ) : (
+                                                pendingRequests.map((r) => (
+                                                            <div
+                                                                key={r.id}
+                                                                className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
+                                                            >
+                                                                <div className="text-sm text-gray-800">
+                                                                    <div className="font-medium">
+                                                                        {[r.requester_first_name, r.requester_last_name].filter(Boolean).join(' ') || r.requester_username}
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-500">
+                                                                        {r.requester_email || r.requester_username}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        onClick={() => approveRequest(r.id)}
+                                                                        className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                                                                    >
+                                                                        Принять
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => denyRequest(r.id)}
+                                                                        className="rounded bg-yellow-600 px-3 py-1 text-xs font-medium text-white hover:bg-yellow-700"
+                                                                    >
+                                                                        Отклонить
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => blockRequester(r.requester)}
+                                                                        className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                                                                    >
+                                                                        Заблокировать
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                        </div>
+                                    ) : manageLoading ? (
+                                        <p className="py-8 text-center text-gray-500">Загрузка...</p>
+                                    ) : manageError ? (
+                                        <p className="py-8 text-center text-red-600">{manageError}</p>
+                                    ) : manageTab === 'blocked' ? (
+                                        <div className="space-y-2">
+                                            {manageBlocked.length === 0 ? (
+                                                <p className="py-4 text-center text-gray-500">Нет заблокированных пользователей</p>
+                                            ) : (
+                                                manageBlocked.map((b) => (
+                                                    <div
+                                                        key={b.id}
+                                                        className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
+                                                    >
+                                                        <div className="text-sm">
+                                                            <span className="font-medium text-gray-800">
+                                                                {[b.requester_first_name, b.requester_last_name].filter(Boolean).join(' ') || b.requester_username}
+                                                            </span>
+                                                            <span className="ml-2 text-gray-500">
+                                                                {b.requester_email || b.requester_username}
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => unblockUser(b.requester)}
+                                                            className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                                                        >
+                                                            Разблокировать
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    ) : manageTab === 'members' ? (
+                                        <div className="space-y-2">
+                                            {manageMembers.length === 0 ? (
+                                                <p className="py-4 text-center text-gray-500">Нет участников</p>
+                                            ) : (
+                                                manageMembers.map((m) => (
+                                                    <div
+                                                        key={m.id}
+                                                        className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
+                                                    >
+                                                        <span className="font-medium text-gray-800">{m.username}</span>
+                                                        <span
+                                                            className={`rounded px-2 py-0.5 text-xs ${
+                                                                m.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
+                                                            }`}
+                                                        >
+                                                            {m.role === 'admin' ? 'Админ' : 'Участник'}
+                                                        </span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {manageLogs.length === 0 ? (
+                                                <p className="py-4 text-center text-gray-500">Лог пуст</p>
+                                            ) : (
+                                                manageLogs.map((log) => (
+                                                    <div
+                                                        key={log.id}
+                                                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                                                    >
+                                                        <span className="font-medium text-gray-800">{log.actor_username || '—'}</span>
+                                                        {' '}
+                                                        <span className="text-gray-600">
+                                                            {{
+                                                                approved: 'принял',
+                                                                denied: 'отклонил',
+                                                                blocked: 'заблокировал',
+                                                                unblocked: 'разблокировал',
+                                                                removed: 'удалил',
+                                                            }[log.action] ?? log.action_display}
+                                                        </span>
+                                                        {' '}
+                                                        <span className="font-medium text-gray-800">{log.target_username || '—'}</span>
+                                                        <span className="ml-2 text-xs text-gray-400">
+                                                            {new Date(log.created_at).toLocaleString('ru-RU')}
+                                                        </span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="border-t border-gray-200 px-4 py-2">
+                                    <button
+                                        onClick={() => setShowManageModal(false)}
+                                        className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
+                                    >
+                                        Закрыть
+                                    </button>
                                 </div>
                             </div>
                         </div>

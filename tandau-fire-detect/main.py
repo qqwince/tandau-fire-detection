@@ -11,12 +11,12 @@ from telegram_sender import send_telegram_photo
 CONFIG = {
     'skip_frames': False,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
     'reduce_quality': True,  # Включить/выключить понижение качества
-    'quality_scale': 0.5,  # Масштаб качества (0.5 = 50% от оригинала)
+    'quality_scale': 1,  # Масштаб качества (0.5 = 50% от оригинала)
     'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
-    'detection_confidence': 0.8,  # Порог уверенности для детекции
+    'detection_confidence': 0.4,  # Порог уверенности для детекции
 }
 
-model = YOLO("model_v2.1.pt")
+model = YOLO("last.pt")
 save_path = "fire_detections/"
 os.makedirs(save_path, exist_ok=True)
 
