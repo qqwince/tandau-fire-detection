@@ -163,8 +163,13 @@ def receive_fire(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def list_fires(request):
+    # Пожары только из сессий, участником которых является текущий пользователь
+    allowed_session_ids = _session_ids_for_user(request.user)
+    # Базовый запрос: только пожары из доступных сессий (пожары без сессии не показываем)
+    fires = Fire.objects.filter(session_id__in=allowed_session_ids)
+
     # Получаем параметры пагинации
     page = request.GET.get('page', 1)
     page_size = request.GET.get('page_size', 10)
@@ -176,14 +181,13 @@ def list_fires(request):
     sort_field = request.GET.get('sort_field', 'time')
     sort_order = request.GET.get('sort_order', 'desc')
     
-    # Фильтр по сессии (если указан session_id)
+    # Фильтр по сессии (если указан session_id) — только если сессия доступна пользователю
     session_id = request.GET.get('session_id')
-
-    # Базовый запрос
-    fires = Fire.objects.all()
     if session_id:
         try:
-            fires = fires.filter(session_id=int(session_id))
+            sid = int(session_id)
+            if sid in allowed_session_ids:
+                fires = fires.filter(session_id=sid)
         except ValueError:
             pass
     
@@ -232,8 +236,14 @@ def list_fires(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def map_fires(request):
-    fires = Fire.objects.filter(latitude__isnull=False, longitude__isnull=False).order_by('-time')
+    allowed_session_ids = _session_ids_for_user(request.user)
+    fires = Fire.objects.filter(
+        session_id__in=allowed_session_ids,
+        latitude__isnull=False,
+        longitude__isnull=False,
+    ).order_by('-time')
     fire_data = [
         {
             "location": fire.location,
@@ -289,9 +299,18 @@ def request_join_by_code(request):
         return Response({'error': 'You are blocked from this session'}, status=status.HTTP_403_FORBIDDEN)
 
     jr, created = JoinRequest.objects.get_or_create(session=session, requester=request.user)
-    if not created and jr.status == 'denied':
-        jr.status = 'pending'
-        jr.save(update_fields=['status'])
+    if not created:
+        if jr.status == 'denied':
+            jr.status = 'pending'
+            jr.save(update_fields=['status'])
+        elif jr.status == 'approved':
+            # Был исключён: заявка снова должна попасть в ожидающие для повторного одобрения
+            is_active_member = Membership.objects.filter(
+                user=request.user, session=session, is_active=True
+            ).exists()
+            if not is_active_member:
+                jr.status = 'pending'
+                jr.save(update_fields=['status'])
 
     return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)
 
@@ -316,10 +335,26 @@ def pending_requests_for_session(request, session_id: int):
     return Response(JoinRequestSerializer(requests_qs, many=True).data, status=status.HTTP_200_OK)
 
 
+def _session_ids_for_user(user: User):
+    """Сессии, в которых пользователь владелец или активный участник (для фильтрации пожаров)."""
+    if not user or not user.is_authenticated:
+        return []
+    owned = set(Session.objects.filter(owner=user).values_list('id', flat=True))
+    member = set(Membership.objects.filter(user=user, is_active=True).values_list('session_id', flat=True))
+    return list(owned | member)
+
+
 def _ensure_admin(user: User, session: Session) -> bool:
     return (
         session.owner_id == user.id or
         Membership.objects.filter(user=user, session=session, role='admin', is_active=True).exists()
+    )
+
+def _ensure_admin_or_moderator(user: User, session: Session) -> bool:
+    """Проверяет, является ли пользователь админом или модератором"""
+    return (
+        session.owner_id == user.id or
+        Membership.objects.filter(user=user, session=session, role__in=['admin', 'moderator'], is_active=True).exists()
     )
 
 
@@ -336,7 +371,12 @@ def approve_request(request, request_id: int):
 
     jr.status = 'approved'
     jr.save(update_fields=['status'])
-    Membership.objects.get_or_create(user=jr.requester, session=jr.session, defaults={'role': 'member', 'is_active': True})
+    membership, created = Membership.objects.get_or_create(
+        user=jr.requester, session=jr.session, defaults={'role': 'member', 'is_active': True}
+    )
+    if not created and not membership.is_active:
+        membership.is_active = True
+        membership.save(update_fields=['is_active'])
     SessionAuditLog.objects.create(session=jr.session, actor=request.user, action='approved', target_user=jr.requester)
     return Response(JoinRequestSerializer(jr).data, status=status.HTTP_200_OK)
 
@@ -443,3 +483,127 @@ def session_audit_log(request, session_id: int):
 
     logs = SessionAuditLog.objects.filter(session=session).select_related('actor', 'target_user').order_by('-created_at')[:100]
     return Response(SessionAuditLogSerializer(logs, many=True).data, status=status.HTTP_200_OK)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def rename_session(request, session_id: int):
+    """Переименование сессии (только владелец или админ)"""
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin(request.user, session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    new_name = request.data.get('name')
+    if not new_name or not new_name.strip():
+        return Response({'error': 'name is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    session.name = new_name.strip()
+    session.save(update_fields=['name'])
+    SessionAuditLog.objects.create(session=session, actor=request.user, action='removed', target_user=None)
+    return Response(SessionSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_member_role(request, session_id: int, user_id: int):
+    """Изменение роли участника (только админ, модератор не может давать админку)"""
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Проверяем права - только админ или модератор
+    if not _ensure_admin_or_moderator(request.user, session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Проверяем, является ли текущий пользователь модератором
+    current_membership = Membership.objects.filter(user=request.user, session=session, is_active=True).first()
+    is_moderator = current_membership and current_membership.role == 'moderator'
+
+    new_role = request.data.get('role')
+    if new_role not in ['admin', 'moderator', 'member']:
+        return Response({'error': 'Invalid role'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Модератор не может давать админку
+    if is_moderator and new_role == 'admin':
+        return Response({'error': 'Moderators cannot assign admin role'}, status=status.HTTP_403_FORBIDDEN)
+
+    # Нельзя изменить роль владельца
+    if session.owner_id == user_id:
+        return Response({'error': 'Cannot change owner role'}, status=status.HTTP_400_BAD_REQUEST)
+
+    membership = Membership.objects.filter(user_id=user_id, session=session).first()
+    if not membership:
+        return Response({'error': 'User is not a member of this session'}, status=status.HTTP_404_NOT_FOUND)
+
+    old_role = membership.role
+    membership.role = new_role
+    membership.save(update_fields=['role'])
+
+    SessionAuditLog.objects.create(
+        session=session,
+        actor=request.user,
+        action='role_changed',
+        target_user_id=user_id,
+        role_granted=new_role,
+    )
+
+    return Response(MembershipSerializer(membership).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def remove_member(request, session_id: int, user_id: int):
+    """Исключить участника из сессии (админ или модератор). Владельца исключить нельзя."""
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin_or_moderator(request.user, session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    if session.owner_id == user_id:
+        return Response({'error': 'Cannot remove session owner'}, status=status.HTTP_400_BAD_REQUEST)
+
+    membership = Membership.objects.filter(user_id=user_id, session=session).first()
+    if not membership:
+        return Response({'error': 'User is not a member of this session'}, status=status.HTTP_404_NOT_FOUND)
+    if not membership.is_active:
+        return Response({'error': 'User is already removed from session'}, status=status.HTTP_400_BAD_REQUEST)
+
+    membership.is_active = False
+    membership.save(update_fields=['is_active'])
+    SessionAuditLog.objects.create(
+        session=session,
+        actor=request.user,
+        action='removed',
+        target_user_id=user_id,
+    )
+    return Response({'status': 'ok'}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def refresh_join_code(request, session_id: int):
+    """Обновить код сессии: старый код становится недействительным, выдаётся новый. Только владелец или админ."""
+    try:
+        session = Session.objects.get(id=session_id)
+    except Session.DoesNotExist:
+        return Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _ensure_admin(request.user, session):
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    old_code = session.join_code
+    new_code = get_random_string(8)
+    while new_code == old_code:
+        new_code = get_random_string(8)
+    session.join_code = new_code
+    session.save(update_fields=['join_code'])
+    session.refresh_from_db()
+    return Response(SessionSerializer(session).data, status=status.HTTP_200_OK)

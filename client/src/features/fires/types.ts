@@ -7,6 +7,7 @@ export interface FireSite {
     longitude: number
     image?: string
     conf: number
+    session_name?: string
 }
 
 export type SortField = 'time' | 'conf'

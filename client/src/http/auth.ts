@@ -129,7 +129,7 @@ export interface SessionMember {
     user: number
     username: string
     session: number
-    role: 'admin' | 'member'
+    role: 'admin' | 'moderator' | 'member'
     is_active: boolean
     created_at: string
 }
@@ -149,14 +149,38 @@ export interface AuditLogEntry {
     session: number
     actor: number | null
     actor_username: string
-    action: 'approved' | 'denied' | 'blocked' | 'unblocked' | 'removed'
+    action: 'approved' | 'denied' | 'blocked' | 'unblocked' | 'removed' | 'role_changed'
     action_display: string
     target_user: number | null
     target_username: string
+    role_granted?: string | null
+    role_display?: string | null
     created_at: string
 }
 
 export const getSessionAuditLog = async (sessionId: number): Promise<AuditLogEntry[]> => {
     const { data } = await $host.get(`/api/sessions/${sessionId}/audit-log/`)
+    return data
+}
+
+export const renameSession = async (sessionId: number, newName: string): Promise<Session> => {
+    const { data } = await $host.patch(`/api/sessions/${sessionId}/rename/`, { name: newName })
+    return data
+}
+
+export const changeMemberRole = async (sessionId: number, userId: number, role: 'admin' | 'moderator' | 'member'): Promise<SessionMember> => {
+    const { data } = await $host.post(`/api/sessions/${sessionId}/members/${userId}/role/`, { role })
+    return data
+}
+
+/** Исключить участника из сессии (владельца исключить нельзя) */
+export const removeMember = async (sessionId: number, userId: number): Promise<{ status: string }> => {
+    const { data } = await $host.post(`/api/sessions/${sessionId}/members/${userId}/remove/`)
+    return data
+}
+
+/** Обновить код сессии: старый код становится недействительным, возвращается сессия с новым join_code */
+export const refreshJoinCode = async (sessionId: number): Promise<Session> => {
+    const { data } = await $host.post(`/api/sessions/${sessionId}/refresh-code/`)
     return data
 }

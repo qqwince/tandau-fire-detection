@@ -4,6 +4,8 @@ from django.contrib.auth import authenticate
 from .models import Fire, Session, Membership, JoinRequest, SessionAuditLog
 
 class FireSerializer(serializers.ModelSerializer):
+    session_name = serializers.ReadOnlyField(source='session.name')
+    
     class Meta:
         model = Fire
         fields = '__all__'
@@ -54,10 +56,17 @@ class SessionAuditLogSerializer(serializers.ModelSerializer):
     actor_username = serializers.SerializerMethodField()
     target_username = serializers.SerializerMethodField()
     action_display = serializers.CharField(source='get_action_display', read_only=True)
+    role_display = serializers.SerializerMethodField()
 
     class Meta:
         model = SessionAuditLog
-        fields = ('id', 'session', 'actor', 'actor_username', 'action', 'action_display', 'target_user', 'target_username', 'created_at')
+        fields = ('id', 'session', 'actor', 'actor_username', 'action', 'action_display', 'target_user', 'target_username', 'role_granted', 'role_display', 'created_at')
+
+    def get_role_display(self, obj):
+        if not obj.role_granted:
+            return None
+        role_map = {'admin': 'Админ', 'moderator': 'Модератор', 'member': 'Участник'}
+        return role_map.get(obj.role_granted, obj.role_granted)
 
     def get_actor_username(self, obj):
         return obj.actor.username if obj.actor else None

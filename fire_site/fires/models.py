@@ -15,6 +15,7 @@ class Session(models.Model):
 class Membership(models.Model):
     ROLE_CHOICES = (
         ('admin', 'Admin'),
+        ('moderator', 'Moderator'),
         ('member', 'Member'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='memberships')
@@ -37,11 +38,13 @@ class SessionAuditLog(models.Model):
         ('blocked', 'Blocked'),
         ('unblocked', 'Unblocked'),
         ('removed', 'Removed'),
+        ('role_changed', 'Role changed'),
     )
     session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name='audit_logs')
     actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_actions')
     action = models.CharField(max_length=20, choices=ACTION_CHOICES)
     target_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_targeted')
+    role_granted = models.CharField(max_length=20, blank=True, null=True)  # для action=role_changed
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

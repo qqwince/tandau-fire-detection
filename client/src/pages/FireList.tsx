@@ -14,6 +14,10 @@ import {
     getSessionMembers,
     getSessionBlocked,
     getSessionAuditLog,
+    renameSession as renameSessionApi,
+    changeMemberRole as changeMemberRoleApi,
+    removeMember as removeMemberApi,
+    refreshJoinCode as refreshJoinCodeApi,
     type JoinRequest,
     type SessionMember,
     type AuditLogEntry,
@@ -41,7 +45,13 @@ const FireList = () => {
     const [manageBlocked, setManageBlocked] = useState<JoinRequest[]>([])
     const [manageLogs, setManageLogs] = useState<AuditLogEntry[]>([])
     const [manageLoading, setManageLoading] = useState(false)
+    const [codeRefreshLoading, setCodeRefreshLoading] = useState(false)
+    /** Код, возвращённый последним запросом «Обновить», чтобы гарантированно отобразить новый код */
+    const [refreshedJoinCode, setRefreshedJoinCode] = useState<string | null>(null)
+    const [codeCopied, setCodeCopied] = useState(false)
     const [manageError, setManageError] = useState<string | null>(null)
+    const [editingSessionName, setEditingSessionName] = useState(false)
+    const [editingSessionNameValue, setEditingSessionNameValue] = useState('')
     const [selectedImage, setSelectedImage] = useState<string | null>(null)
     const [imageScale, setImageScale] = useState(1)
     const [imagePosition, setImagePosition] = useState<ImagePosition>({
@@ -74,10 +84,13 @@ const FireList = () => {
         hasPrevious: false,
     })
 
+    // Ключ списка сессий: при изменении (например, приняли в новую сессию) перезапрашиваем отчёты
+    const sessionIdsKey = sessions.map((s) => s.id).sort().join(',')
+
     useEffect(() => {
         // Показываем большой лоадер только при самом первом входе
         loadSites(true)
-    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId])
+    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId, sessionIdsKey])
 
     // Live updates via SSE (stable) with polling fallback
     useEffect(() => {
@@ -184,6 +197,18 @@ const FireList = () => {
         }
     }, [isAuthenticated, activeSessionId])
 
+    // Динамическое обновление заявок и данных модалки, пока она открыта
+    useEffect(() => {
+        if (!showManageModal || !activeSessionId) return
+        const refresh = () => {
+            loadPendingRequests(activeSessionId)
+            loadManageData()
+            loadSessions()
+        }
+        const interval = setInterval(refresh, 5000)
+        return () => clearInterval(interval)
+    }, [showManageModal, activeSessionId])
+
     // Таймер подтверждения показа кода (3 сек)
     useEffect(() => {
         if (!showManageModal || manageTab !== 'code') {
@@ -206,15 +231,6 @@ const FireList = () => {
                     case 'Escape':
                         closeImageModal()
                         break
-                    case '+':
-                    case '=':
-                        event.preventDefault()
-                        handleZoomIn()
-                        break
-                    case '-':
-                        event.preventDefault()
-                        handleZoomOut()
-                        break
                     case 'r':
                     case 'R':
                         resetImagePosition()
@@ -227,9 +243,10 @@ const FireList = () => {
             if (isDragging && selectedImage) {
                 const deltaX = event.clientX - dragStart.x
                 const deltaY = event.clientY - dragStart.y
+                const factor = 0.45
                 setImagePosition((prev) => ({
-                    x: prev.x + deltaX,
-                    y: prev.y + deltaY,
+                    x: prev.x + deltaX * factor,
+                    y: prev.y + deltaY * factor,
                 }))
                 setDragStart({ x: event.clientX, y: event.clientY })
             }
@@ -249,14 +266,32 @@ const FireList = () => {
             setShowControls(true)
         }
 
+        const handleWheel = (event: WheelEvent) => {
+            if (selectedImage) {
+                event.preventDefault()
+                const delta = event.deltaY > 0 ? -0.1 : 0.1
+                setImageScale((prev) => {
+                    const newScale = Math.max(0.5, Math.min(3, prev + delta))
+                    if (newScale > 1.25) {
+                        setTimeout(() => setShowControls(false), 2000)
+                    } else {
+                        setShowControls(true)
+                    }
+                    return newScale
+                })
+            }
+        }
+
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('mousemove', handleMouseMove)
         window.addEventListener('mouseup', handleMouseUp)
+        window.addEventListener('wheel', handleWheel, { passive: false })
 
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
             window.removeEventListener('mousemove', handleMouseMove)
             window.removeEventListener('mouseup', handleMouseUp)
+            window.removeEventListener('wheel', handleWheel)
             if (hideControlsTimer) clearTimeout(hideControlsTimer)
         }
     }, [selectedImage, isDragging, dragStart, imageScale])
@@ -436,8 +471,49 @@ const FireList = () => {
     const openManageModal = () => {
         setShowManageModal(true)
         setManageTab('code')
+        setRefreshedJoinCode(null)
+        setCodeCopied(false)
         loadManageData()
-        if (activeSessionId) loadPendingRequests(activeSessionId)
+        if (activeSessionId) {
+            loadPendingRequests(activeSessionId)
+            const currentSession = sessions.find(s => s.id === activeSessionId)
+            if (currentSession) {
+                setEditingSessionNameValue(currentSession.name)
+            }
+        }
+    }
+
+    const handleRenameSession = async () => {
+        if (!activeSessionId || !editingSessionNameValue.trim()) return
+        try {
+            await renameSessionApi(activeSessionId, editingSessionNameValue.trim())
+            await loadSessions()
+            setEditingSessionName(false)
+            loadManageData()
+        } catch (e) {
+            console.error('Ошибка переименования:', e)
+        }
+    }
+
+    const handleChangeRole = async (userId: number, newRole: 'admin' | 'moderator' | 'member') => {
+        if (!activeSessionId) return
+        try {
+            await changeMemberRoleApi(activeSessionId, userId, newRole)
+            loadManageData()
+        } catch (e) {
+            console.error('Ошибка изменения роли:', e)
+        }
+    }
+
+    const handleRemoveMember = async (userId: number) => {
+        if (!activeSessionId) return
+        try {
+            await removeMemberApi(activeSessionId, userId)
+            await loadSessions()
+            loadManageData()
+        } catch (e) {
+            console.error('Ошибка исключения участника:', e)
+        }
     }
 
     const unblockUser = async (userId: number) => {
@@ -533,30 +609,6 @@ const FireList = () => {
         setImagePosition({ x: 0, y: 0 })
         setIsDragging(false)
         setShowControls(true)
-    }
-
-    const handleZoomIn = () => {
-        setImageScale((prev) => {
-            const newScale = Math.min(prev + 0.25, 3)
-            if (newScale > 1.25) {
-                setTimeout(() => setShowControls(false), 2000)
-            }
-            return newScale
-        })
-    }
-
-    const handleZoomOut = () => {
-        setImageScale((prev) => {
-            const newScale = Math.max(prev - 0.25, 0.5)
-            if (newScale <= 1.25) {
-                setShowControls(true)
-                // Reset position when zooming out significantly
-                if (newScale === 1) {
-                    setImagePosition({ x: 0, y: 0 })
-                }
-            }
-            return newScale
-        })
     }
 
     const resetImagePosition = () => {
@@ -1079,7 +1131,14 @@ const FireList = () => {
                                         <div className="flex-1 p-6">
                                             <div className="mb-4 flex items-start justify-between">
                                                 <h3 className="flex items-center gap-2 text-xl font-bold text-gray-800">
-                                                    📍 {site.location}
+                                                    <span>
+                                                        📍 {site.location}
+                                                        {site.session_name && (
+                                                            <span className="ml-2 text-sm font-normal text-gray-500">
+                                                                ({site.session_name})
+                                                            </span>
+                                                        )}
+                                                    </span>
                                                     {approvedSites.has(
                                                         site.id
                                                     ) && (
@@ -1355,59 +1414,15 @@ const FireList = () => {
                             onMouseLeave={handleModalMouseLeave}
                             onClick={closeImageModal}
                         >
-                            <div className="relative max-h-screen max-w-screen p-4">
+                            <div className="relative max-h-screen max-w-screen p-8">
                                 {/* Панель управления */}
-                                <div className="controls-fade absolute top-4 right-4 z-10 flex gap-2">
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            handleZoomOut()
-                                        }}
-                                        className="bg-opacity-20 hover:bg-opacity-40 rounded-lg bg-black p-2 text-white backdrop-blur-sm transition-all duration-200 hover:scale-110"
-                                        title="Уменьшить (клавиша -)"
-                                    >
-                                        <svg
-                                            className="h-5 w-5"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M20 12H4"
-                                            />
-                                        </svg>
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            handleZoomIn()
-                                        }}
-                                        className="bg-opacity-20 hover:bg-opacity-40 rounded-lg bg-black p-2 text-white backdrop-blur-sm transition-all duration-200 hover:scale-110"
-                                        title="Увеличить (клавиша +)"
-                                    >
-                                        <svg
-                                            className="h-5 w-5"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M12 4v16m8-8H4"
-                                            />
-                                        </svg>
-                                    </button>
+                                <div className="controls-fade absolute top-8 right-8 z-10 flex gap-2">
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation()
                                             resetImagePosition()
                                         }}
-                                        className="bg-opacity-20 hover:bg-opacity-40 rounded-lg bg-black p-2 text-white backdrop-blur-sm transition-all duration-200 hover:scale-110"
+                                        className="bg-opacity-90 hover:bg-opacity-100 rounded-lg bg-gray-800 p-2 text-gray-100 backdrop-blur-sm transition-all duration-200 hover:scale-110 shadow-lg"
                                         title="Сбросить (клавиша R)"
                                     >
                                         <svg
@@ -1429,7 +1444,7 @@ const FireList = () => {
                                             e.stopPropagation()
                                             closeImageModal()
                                         }}
-                                        className="bg-opacity-20 hover:bg-opacity-40 rounded-lg bg-black p-2 text-white backdrop-blur-sm transition-all duration-200 hover:scale-110"
+                                        className="bg-opacity-90 hover:bg-opacity-100 rounded-lg bg-gray-800 p-2 text-gray-100 backdrop-blur-sm transition-all duration-200 hover:scale-110 shadow-lg"
                                         title="Закрыть (Escape)"
                                     >
                                         <svg
@@ -1449,7 +1464,7 @@ const FireList = () => {
                                 </div>
 
                                 {/* Индикатор масштаба */}
-                                <div className="bg-opacity-20 controls-fade absolute top-4 left-4 z-10 rounded-lg bg-black px-3 py-1 text-white backdrop-blur-sm">
+                                <div className="bg-opacity-90 controls-fade absolute top-8 left-8 z-10 rounded-lg bg-gray-800 px-3 py-1 text-gray-100 backdrop-blur-sm shadow-lg">
                                     {Math.round(imageScale * 100)}%
                                 </div>
 
@@ -1470,16 +1485,9 @@ const FireList = () => {
                                 />
 
                                 {/* Подсказка */}
-                                <div className="bg-opacity-20 controls-fade absolute bottom-4 left-1/2 -translate-x-1/2 transform rounded-lg bg-black px-4 py-2 text-center text-white backdrop-blur-sm">
+                                <div className="bg-opacity-90 controls-fade absolute bottom-8 left-1/2 -translate-x-1/2 transform rounded-lg bg-gray-800 px-4 py-2 text-center text-gray-100 backdrop-blur-sm shadow-lg">
                                     <p className="text-sm">
-                                        <kbd className="bg-opacity-30 rounded bg-white px-1">
-                                            +
-                                        </kbd>{' '}
-                                        и{' '}
-                                        <kbd className="bg-opacity-30 rounded bg-white px-1">
-                                            -
-                                        </kbd>{' '}
-                                        для масштаба
+                                        Колесико мыши для масштаба
                                         {imageScale > 1 && (
                                             <span>
                                                 , перетащите для перемещения
@@ -1487,11 +1495,11 @@ const FireList = () => {
                                         )}
                                     </p>
                                     <p className="text-xs opacity-75">
-                                        <kbd className="bg-opacity-30 rounded bg-white px-1">
+                                        <kbd className="bg-opacity-30 rounded bg-gray-600 px-1 text-gray-100">
                                             R
                                         </kbd>{' '}
                                         - сброс,{' '}
-                                        <kbd className="bg-opacity-30 rounded bg-white px-1">
+                                        <kbd className="bg-opacity-30 rounded bg-gray-600 px-1 text-gray-100">
                                             Escape
                                         </kbd>{' '}
                                         - закрыть
@@ -1512,11 +1520,60 @@ const FireList = () => {
                                 onClick={(e) => e.stopPropagation()}
                             >
                                 <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-                                    <h3 className="text-lg font-semibold text-gray-800">
-                                        Управление сессией
-                                    </h3>
+                                    <div className="flex-1">
+                                        {editingSessionName ? (
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={editingSessionNameValue}
+                                                    onChange={(e) => setEditingSessionNameValue(e.target.value)}
+                                                    className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleRenameSession()
+                                                        if (e.key === 'Escape') {
+                                                            setEditingSessionName(false)
+                                                            const currentSession = sessions.find(s => s.id === activeSessionId)
+                                                            if (currentSession) setEditingSessionNameValue(currentSession.name)
+                                                        }
+                                                    }}
+                                                    autoFocus
+                                                />
+                                                <button
+                                                    onClick={handleRenameSession}
+                                                    className="rounded bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-700"
+                                                >
+                                                    Сохранить
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setEditingSessionName(false)
+                                                        const currentSession = sessions.find(s => s.id === activeSessionId)
+                                                        if (currentSession) setEditingSessionNameValue(currentSession.name)
+                                                    }}
+                                                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                                                >
+                                                    Отмена
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="text-lg font-semibold text-gray-800">
+                                                    {sessions.find(s => s.id === activeSessionId)?.name || 'Управление сессией'}
+                                                </h3>
+                                                <button
+                                                    onClick={() => setEditingSessionName(true)}
+                                                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                                    title="Переименовать сессию"
+                                                >
+                                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                     <button
-                                        onClick={() => setShowManageModal(false)}
+                                        onClick={() => { setShowManageModal(false); setRefreshedJoinCode(null); setCodeCopied(false) }}
                                         className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
                                     >
                                         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1552,16 +1609,60 @@ const FireList = () => {
                                                 Код сессии — приватная информация. Не показывайте его на чужом экране.
                                             </p>
                                             {showSessionCodes && activeSessionId ? (
-                                                <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-                                                    <span className="font-mono text-lg font-semibold text-gray-800">
-                                                        {sessions.find((s) => s.id === activeSessionId)?.join_code ?? '—'}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => setShowSessionCodes(false)}
-                                                        className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-200"
-                                                    >
-                                                        Скрыть
-                                                    </button>
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                                                        <span className="font-mono text-lg font-semibold text-gray-800">
+                                                            {refreshedJoinCode ?? sessions.find((s) => s.id === activeSessionId)?.join_code ?? '—'}
+                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const code = refreshedJoinCode ?? sessions.find((s) => s.id === activeSessionId)?.join_code ?? ''
+                                                                    if (code && navigator.clipboard?.writeText) {
+                                                                        navigator.clipboard.writeText(code)
+                                                                        setCodeCopied(true)
+                                                                        setTimeout(() => setCodeCopied(false), 2000)
+                                                                    }
+                                                                }}
+                                                                className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-200"
+                                                                title="Копировать код"
+                                                            >
+                                                                {codeCopied ? 'Скопировано' : 'Копировать'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={codeRefreshLoading}
+                                                                onClick={async () => {
+                                                                    if (!activeSessionId) return
+                                                                    setCodeRefreshLoading(true)
+                                                                    try {
+                                                                        const updated = await refreshJoinCodeApi(activeSessionId)
+                                                                        setRefreshedJoinCode(updated.join_code)
+                                                                        setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+                                                                        setShowSessionCodes(true)
+                                                                    } catch (e) {
+                                                                        console.error('Ошибка обновления кода:', e)
+                                                                    } finally {
+                                                                        setCodeRefreshLoading(false)
+                                                                    }
+                                                                }}
+                                                                className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                                                                title="Обновить код (старый станет недействительным)"
+                                                            >
+                                                                {codeRefreshLoading ? '…' : 'Обновить'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setShowSessionCodes(false)}
+                                                                className="rounded border border-gray-300 px-3 py-1 text-sm text-gray-600 hover:bg-gray-200"
+                                                            >
+                                                                Скрыть
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500">
+                                                        По нажатию «Обновить» предыдущий код перестаёт действовать, выдаётся новый.
+                                                    </p>
                                                 </div>
                                             ) : codeConfirmPending ? (
                                                 <div className="flex flex-wrap items-center gap-3">
@@ -1685,21 +1786,47 @@ const FireList = () => {
                                             {manageMembers.length === 0 ? (
                                                 <p className="py-4 text-center text-gray-500">Нет участников</p>
                                             ) : (
-                                                manageMembers.map((m) => (
-                                                    <div
-                                                        key={m.id}
-                                                        className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
-                                                    >
-                                                        <span className="font-medium text-gray-800">{m.username}</span>
-                                                        <span
-                                                            className={`rounded px-2 py-0.5 text-xs ${
-                                                                m.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
-                                                            }`}
+                                                manageMembers.map((m) => {
+                                                    const currentSession = sessions.find((s) => s.id === activeSessionId)
+                                                    const isOwner = currentSession && currentSession.owner === m.user
+                                                    return (
+                                                        <div
+                                                            key={m.id}
+                                                            className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2"
                                                         >
-                                                            {m.role === 'admin' ? 'Админ' : 'Участник'}
-                                                        </span>
-                                                    </div>
-                                                ))
+                                                            <span className="font-medium text-gray-800">
+                                                                {m.username}
+                                                                {isOwner && <span className="ml-2 text-xs text-gray-500">(владелец)</span>}
+                                                            </span>
+                                                            <div className="flex items-center gap-2">
+                                                                <select
+                                                                    value={m.role}
+                                                                    onChange={(e) => handleChangeRole(m.user, e.target.value as 'admin' | 'moderator' | 'member')}
+                                                                    className={`rounded px-2 py-0.5 text-xs border ${
+                                                                        m.role === 'admin'
+                                                                            ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                                                            : m.role === 'moderator'
+                                                                            ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                                                            : 'bg-gray-100 text-gray-600 border-gray-300'
+                                                                    }`}
+                                                                >
+                                                                    <option value="member">Участник</option>
+                                                                    <option value="moderator">Модератор</option>
+                                                                    <option value="admin">Админ</option>
+                                                                </select>
+                                                                {!isOwner && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRemoveMember(m.user)}
+                                                                        className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-200"
+                                                                    >
+                                                                        Исключить
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })
                                             )}
                                         </div>
                                     ) : (
@@ -1715,13 +1842,15 @@ const FireList = () => {
                                                         <span className="font-medium text-gray-800">{log.actor_username || '—'}</span>
                                                         {' '}
                                                         <span className="text-gray-600">
-                                                            {{
-                                                                approved: 'принял',
-                                                                denied: 'отклонил',
-                                                                blocked: 'заблокировал',
-                                                                unblocked: 'разблокировал',
-                                                                removed: 'удалил',
-                                                            }[log.action] ?? log.action_display}
+                                                            {log.action === 'role_changed'
+                                                                ? `выдал роль «${log.role_display ?? log.role_granted ?? '—'}»`
+                                                                : {
+                                                                      approved: 'принял',
+                                                                      denied: 'отклонил',
+                                                                      blocked: 'заблокировал',
+                                                                      unblocked: 'разблокировал',
+                                                                      removed: 'удалил',
+                                                                  }[log.action] ?? log.action_display}
                                                         </span>
                                                         {' '}
                                                         <span className="font-medium text-gray-800">{log.target_username || '—'}</span>
@@ -1736,7 +1865,7 @@ const FireList = () => {
                                 </div>
                                 <div className="border-t border-gray-200 px-4 py-2">
                                     <button
-                                        onClick={() => setShowManageModal(false)}
+                                        onClick={() => { setShowManageModal(false); setRefreshedJoinCode(null); setCodeCopied(false) }}
                                         className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
                                     >
                                         Закрыть

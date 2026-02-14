@@ -5,6 +5,7 @@ from .views import (
     create_session, my_sessions, request_join_by_code,
     pending_requests_for_session, approve_request, deny_request, block_requester,
     unblock_user, session_members, session_blocked, session_audit_log,
+    rename_session, change_member_role, remove_member, refresh_join_code,
     fire_stream,
 )
 
@@ -34,4 +35,8 @@ urlpatterns = [
     path('api/sessions/<int:session_id>/members/', session_members, name='session_members'),
     path('api/sessions/<int:session_id>/blocked/', session_blocked, name='session_blocked'),
     path('api/sessions/<int:session_id>/audit-log/', session_audit_log, name='session_audit_log'),
+    path('api/sessions/<int:session_id>/rename/', rename_session, name='rename_session'),
+    path('api/sessions/<int:session_id>/members/<int:user_id>/role/', change_member_role, name='change_member_role'),
+    path('api/sessions/<int:session_id>/members/<int:user_id>/remove/', remove_member, name='remove_member'),
+    path('api/sessions/<int:session_id>/refresh-code/', refresh_join_code, name='refresh_join_code'),
 ]

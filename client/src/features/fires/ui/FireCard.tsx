@@ -32,7 +32,7 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
                 <div className="flex-1 p-6">
                     <div className="mb-4 flex items-start justify-between">
                         <h3 className="flex items-center gap-2 text-xl font-bold text-gray-800">
-                            📍 {site.location}
+                            📍 {site.location }
                             {approved && <div className="animate-sparkle ml-2 text-green-600">✨</div>}
                         </h3>
                         <div
