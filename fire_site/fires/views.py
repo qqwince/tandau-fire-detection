@@ -18,9 +18,14 @@ from .serializers import (
     JoinRequestSerializer,
     SessionAuditLogSerializer,
 )
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
+from django.db.models import Q
+from django.utils import timezone
+from datetime import timedelta
 import json
 import queue
+import zipfile
+import io
 from typing import Dict, Any
 
 
@@ -167,8 +172,11 @@ def receive_fire(request):
 def list_fires(request):
     # Пожары только из сессий, участником которых является текущий пользователь
     allowed_session_ids = _session_ids_for_user(request.user)
-    # Базовый запрос: только пожары из доступных сессий (пожары без сессии не показываем)
+    # Базовый запрос: только пожары из доступных сессий; по умолчанию не скрытые
+    include_hidden = request.GET.get('include_hidden', '').lower() in ('1', 'true', 'yes')
     fires = Fire.objects.filter(session_id__in=allowed_session_ids)
+    if not include_hidden:
+        fires = fires.filter(hidden=False)
 
     # Получаем параметры пагинации
     page = request.GET.get('page', 1)
@@ -191,6 +199,14 @@ def list_fires(request):
         except ValueError:
             pass
     
+    # Поиск по отчётам (id, локация, описание)
+    search = (request.GET.get('search') or request.GET.get('q') or '').strip()
+    if search:
+        q = Q(location__icontains=search) | Q(description__icontains=search)
+        if search.isdigit():
+            q = q | Q(id=int(search))
+        fires = fires.filter(q)
+
     # Применяем фильтры
     if location:
         fires = fires.filter(location__icontains=location)
@@ -237,10 +253,172 @@ def list_fires(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def export_fires_zip(request):
+    """Скачать выбранные отчёты в ZIP (изображения + манифест). Параметр ids=1,2,3."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    ids_param = request.GET.get('ids', '')
+    if not ids_param:
+        return Response({'error': 'ids is required (comma-separated)'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        ids = [int(x.strip()) for x in ids_param.split(',') if x.strip()]
+    except ValueError:
+        return Response({'error': 'Invalid ids'}, status=status.HTTP_400_BAD_REQUEST)
+    if not ids:
+        return Response({'error': 'No valid ids'}, status=status.HTTP_400_BAD_REQUEST)
+
+    fires = Fire.objects.filter(id__in=ids, session_id__in=allowed_session_ids).select_related('session')
+    if not fires.exists():
+        return Response({'error': 'No accessible reports found'}, status=status.HTTP_404_NOT_FOUND)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        lines = []
+        for f in fires:
+            prefix = f'report_{f.id}'
+            # Текстовый манифест по отчёту
+            info = (
+                f"ID: {f.id}\n"
+                f"Локация: {f.location}\n"
+                f"Время: {f.time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Координаты: {f.latitude},{f.longitude}\n"
+                f"Точность: {f.conf}\n"
+                f"Сессия: {f.session.name if f.session_id else '—'}\n"
+                f"Описание: {f.description or '—'}\n"
+            )
+            zf.writestr(f'{prefix}_info.txt', info.encode('utf-8'))
+            if f.image:
+                try:
+                    f.image.open('rb')
+                    zf.writestr(f'{prefix}.jpg', f.image.read())
+                finally:
+                    f.image.close()
+            lines.append(f"{f.id};{f.location};{f.time.isoformat()};{f.latitude};{f.longitude};{f.conf}")
+        zf.writestr('manifest.csv', '\n'.join(['id;location;time;lat;lon;conf'] + lines).encode('utf-8'))
+
+    buf.seek(0)
+    response = HttpResponse(buf.getvalue(), content_type='application/zip')
+    response['Content-Disposition'] = 'attachment; filename="fire_reports.zip"'
+    return response
+
+
+@api_view(['PATCH', 'POST'])
+@permission_classes([IsAuthenticated])
+def set_fire_approved(request, fire_id: int):
+    """Установить/снять статус «подтверждён» у отчёта. Только для отчётов из своих сессий."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    fire = Fire.objects.filter(id=fire_id, session_id__in=allowed_session_ids).first()
+    if not fire:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    approved = request.data.get('approved')
+    if approved is None:
+        fire.approved = not fire.approved
+    else:
+        fire.approved = bool(approved)
+    fire.save(update_fields=['approved'])
+    return Response(FireSerializer(fire).data, status=status.HTTP_200_OK)
+
+
+def _parse_older_than(request):
+    """Вернуть (cutoff_datetime, error_response) или (cutoff, None)."""
+    try:
+        n = int(request.GET.get('older_than') or request.data.get('older_than', 0))
+    except (TypeError, ValueError):
+        return None, Response({'error': 'older_than must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
+    if n <= 0:
+        return None, Response({'error': 'older_than must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+    unit = (request.GET.get('unit') or request.data.get('unit') or 'days').strip().lower()
+    unit_map = {
+        'minute': timedelta(minutes=1),
+        'minutes': timedelta(minutes=1),
+        'hour': timedelta(hours=1),
+        'hours': timedelta(hours=1),
+        'day': timedelta(days=1),
+        'days': timedelta(days=1),
+        'week': timedelta(weeks=1),
+        'weeks': timedelta(weeks=1),
+        'month': timedelta(days=30),
+        'months': timedelta(days=30),
+    }
+    delta = unit_map.get(unit)
+    if not delta:
+        return None, Response({'error': 'unit must be: minutes, hours, days, weeks, months'}, status=status.HTTP_400_BAD_REQUEST)
+    cutoff = timezone.now() - (delta * n)
+    return cutoff, None
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def hide_fires_by_age(request):
+    """Скрыть отчёты старше N единиц времени (из своих сессий). Возвращает hidden_ids для отмены."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    cutoff, err = _parse_older_than(request)
+    if err:
+        return err
+    qs = Fire.objects.filter(
+        session_id__in=allowed_session_ids,
+        time__lt=cutoff,
+        hidden=False,
+    )
+    hidden_ids = list(qs.values_list('id', flat=True))
+    qs.update(hidden=True)
+    return Response({'hidden_count': len(hidden_ids), 'hidden_ids': hidden_ids}, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE', 'POST'])
+@permission_classes([IsAuthenticated])
+def delete_fires_by_age(request):
+    """Безвозвратно удалить отчёты старше N единиц времени (из своих сессий). DELETE/POST ?older_than=N&unit=days."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    cutoff, err = _parse_older_than(request)
+    if err:
+        return err
+    deleted, _ = Fire.objects.filter(
+        session_id__in=allowed_session_ids,
+        time__lt=cutoff,
+    ).delete()
+    return Response({'deleted_count': deleted}, status=status.HTTP_200_OK)
+
+
+@api_view(['PATCH', 'POST'])
+@permission_classes([IsAuthenticated])
+def unhide_fire(request, fire_id: int):
+    """Вернуть отчёт из скрытых (только из своих сессий)."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    fire = Fire.objects.filter(id=fire_id, session_id__in=allowed_session_ids).first()
+    if not fire:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    fire.hidden = False
+    fire.save(update_fields=['hidden'])
+    return Response(FireSerializer(fire).data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def unhide_fires(request):
+    """Вернуть из скрытых отчёты по списку id (для отмены скрытия). POST body: { fire_ids: [1,2,3] }."""
+    allowed_session_ids = _session_ids_for_user(request.user)
+    fire_ids = request.data.get('fire_ids') or request.data.get('ids') or []
+    if not fire_ids:
+        return Response({'unhidden_count': 0}, status=status.HTTP_200_OK)
+    try:
+        ids = [int(x) for x in fire_ids]
+    except (TypeError, ValueError):
+        return Response({'error': 'fire_ids must be list of integers'}, status=status.HTTP_400_BAD_REQUEST)
+    updated = Fire.objects.filter(
+        id__in=ids,
+        session_id__in=allowed_session_ids,
+        hidden=True,
+    ).update(hidden=False)
+    return Response({'unhidden_count': updated}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def map_fires(request):
     allowed_session_ids = _session_ids_for_user(request.user)
     fires = Fire.objects.filter(
         session_id__in=allowed_session_ids,
+        hidden=False,
         latitude__isnull=False,
         longitude__isnull=False,
     ).order_by('-time')

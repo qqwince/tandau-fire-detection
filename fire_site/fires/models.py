@@ -83,6 +83,8 @@ class Fire(models.Model):
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     conf = models.FloatField(null=True, blank=True)
+    approved = models.BooleanField(default=False)  # подтверждён как реальный пожар (сохраняется на бэкенде)
+    hidden = models.BooleanField(default=False)   # скрыт из списка (по возрасту)
 
     session = models.ForeignKey(Session, on_delete=models.CASCADE, null=True, blank=True, related_name='fires')
 

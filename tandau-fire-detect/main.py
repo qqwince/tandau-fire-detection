@@ -16,7 +16,7 @@ CONFIG = {
     'detection_confidence': 0.4,  # Порог уверенности для детекции
 }
 
-model = YOLO("last.pt")
+model = YOLO("best.pt")
 save_path = "fire_detections/"
 os.makedirs(save_path, exist_ok=True)
 

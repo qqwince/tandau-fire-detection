@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { fetchFireSites, type PaginationParams, type PaginatedResponse } from '../features/fires/api'
+import { fetchFireSites, downloadFiresZip, setFireApproved, hideFiresByAge, deleteFiresByAge, unhideFire, unhideFires, type PaginationParams, type PaginatedResponse, type CleanupUnit } from '../features/fires/api'
 import { useAuth } from '../contexts/AuthContext.tsx'
 import {
     createSession,
@@ -65,6 +65,13 @@ const FireList = () => {
     const [animatingApprovals, setAnimatingApprovals] = useState<Set<string>>(
         new Set()
     )
+    const [cleanupOlderThan, setCleanupOlderThan] = useState(7)
+    const [cleanupUnit, setCleanupUnit] = useState<CleanupUnit>('days')
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [cleanupLoading, setCleanupLoading] = useState(false)
+    const [showHidden, setShowHidden] = useState(false)
+    /** ID отчётов, скрытых последним действием «Скрыть» — для кнопки «Отменить скрытие» */
+    const [lastHiddenIds, setLastHiddenIds] = useState<number[]>([])
     const imageRef = useRef<HTMLImageElement>(null)
     const [filters, setFilters] = useState<Filters>({
         selectedLocations: [],
@@ -72,6 +79,7 @@ const FireList = () => {
         sortOrder: 'desc',
         confMin: 30,
         confMax: 100,
+        searchQuery: '',
     })
 
     // Состояние пагинации
@@ -90,7 +98,7 @@ const FireList = () => {
     useEffect(() => {
         // Показываем большой лоадер только при самом первом входе
         loadSites(true)
-    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId, sessionIdsKey])
+    }, [filters, pagination.currentPage, pagination.pageSize, activeSessionId, sessionIdsKey, showHidden])
 
     // Live updates via SSE (stable) with polling fallback
     useEffect(() => {
@@ -330,6 +338,8 @@ const FireList = () => {
                 // В будущем можно расширить API для поддержки массива локаций
                 params.location = filters.selectedLocations[0]
             }
+            if (filters.searchQuery.trim()) params.search = filters.searchQuery.trim()
+            if (showHidden) params.include_hidden = true
 
             const data: PaginatedResponse<FireSite> =
                 await fetchFireSites(params)
@@ -347,6 +357,7 @@ const FireList = () => {
                 }
                 return merged
             })
+            setApprovedSites(new Set(newList.filter((s: FireSite) => s.approved).map((s) => String(s.id))))
             setPagination((prev: typeof pagination) => ({
                 ...prev,
                 totalPages: data.total_pages,
@@ -567,33 +578,36 @@ const FireList = () => {
         }))
     }
 
-    const handleApproval = (siteId: string, event: React.MouseEvent) => {
+    const handleApproval = async (siteId: string, event: React.MouseEvent) => {
         event.preventDefault()
         event.stopPropagation()
-
-        // Добавляем анимацию
+        const nextApproved = !approvedSites.has(siteId)
         setAnimatingApprovals((prev) => new Set([...prev, siteId]))
-
-        setTimeout(() => {
+        setApprovedSites((prev) => {
+            const next = new Set(prev)
+            if (nextApproved) next.add(siteId)
+            else next.delete(siteId)
+            return next
+        })
+        try {
+            await setFireApproved(siteId, nextApproved)
+        } catch (e) {
+            console.error('Ошибка сохранения подтверждения:', e)
             setApprovedSites((prev) => {
-                const newSet = new Set(prev)
-                if (newSet.has(siteId)) {
-                    newSet.delete(siteId)
-                } else {
-                    newSet.add(siteId)
-                }
-                return newSet
+                const rollback = new Set(prev)
+                if (nextApproved) rollback.delete(siteId)
+                else rollback.add(siteId)
+                return rollback
             })
-
-            // Убираем анимацию через короткое время
+        } finally {
             setTimeout(() => {
                 setAnimatingApprovals((prev) => {
-                    const newSet = new Set(prev)
-                    newSet.delete(siteId)
-                    return newSet
+                    const next = new Set(prev)
+                    next.delete(siteId)
+                    return next
                 })
             }, 300)
-        }, 150)
+        }
     }
 
     const openImageModal = (imageUrl: string) => {
@@ -813,6 +827,13 @@ const FireList = () => {
                                         {approvedSites.size}
                                     </span>{' '}
                                     подтверждено
+                                    <button
+                                        type="button"
+                                        onClick={() => downloadFiresZip(Array.from(approvedSites))}
+                                        className="ml-3 rounded-lg bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700"
+                                    >
+                                        Скачать выбранные (ZIP)
+                                    </button>
                                 </span>
                             )}
                         </p>
@@ -910,6 +931,18 @@ const FireList = () => {
 
                     {/* Панель фильтров */}
                     <div className="animate-scale-in mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-lg transition-all duration-300 hover:shadow-xl">
+                        <div className="mb-6">
+                            <h3 className="mb-2 flex items-center gap-2 text-lg font-semibold text-gray-800">
+                                🔍 Поиск по отчётам
+                            </h3>
+                            <input
+                                type="text"
+                                value={filters.searchQuery}
+                                onChange={(e) => updateFilters({ searchQuery: e.target.value })}
+                                placeholder="ID, локация или описание..."
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-red-500 focus:outline-none"
+                            />
+                        </div>
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                             {/* Фильтр по локации */}
                             <div className="animate-slide-up stagger-1">
@@ -1093,6 +1126,147 @@ const FireList = () => {
                         </div>
                     </div>
 
+                    {/* Панель очистки по возрасту */}
+                    {isAuthenticated && (
+                        <div className="animate-scale-in mb-8 rounded-2xl border border-amber-200 bg-amber-50/50 p-6 shadow-lg">
+                            <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-800">
+                                🧹 Очистка отчётов по возрасту
+                            </h3>
+                            <p className="mb-4 text-sm text-gray-600">
+                                Скрыть или удалить отчёты старше указанного срока (только из ваших сессий).
+                            </p>
+                            <div className="flex flex-wrap items-end gap-4">
+                                <label className="flex flex-col gap-1">
+                                    <span className="text-xs font-medium text-gray-500">Старше</span>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={cleanupOlderThan}
+                                        onChange={(e) => setCleanupOlderThan(Math.max(1, Number(e.target.value) || 1))}
+                                        className="w-24 rounded-lg border border-gray-300 px-3 py-2 focus:border-amber-500 focus:outline-none"
+                                    />
+                                </label>
+                                <label className="flex flex-col gap-1">
+                                    <span className="text-xs font-medium text-gray-500">Единица</span>
+                                    <select
+                                        value={cleanupUnit}
+                                        onChange={(e) => setCleanupUnit(e.target.value as CleanupUnit)}
+                                        className="rounded-lg border border-gray-300 px-3 py-2 focus:border-amber-500 focus:outline-none"
+                                    >
+                                        <option value="minutes">минут</option>
+                                        <option value="hours">часов</option>
+                                        <option value="days">дней</option>
+                                        <option value="weeks">недель</option>
+                                        <option value="months">месяцев</option>
+                                    </select>
+                                </label>
+                                <button
+                                    type="button"
+                                    disabled={cleanupLoading}
+                                    onClick={async () => {
+                                        setCleanupLoading(true)
+                                        try {
+                                            const { hidden_count, hidden_ids } = await hideFiresByAge(cleanupOlderThan, cleanupUnit)
+                                            setLastHiddenIds(hidden_ids || [])
+                                            if (hidden_count > 0) await loadSites()
+                                            setCleanupLoading(false)
+                                        } catch (e) {
+                                            console.error(e)
+                                            setCleanupLoading(false)
+                                        }
+                                    }}
+                                    className="rounded-lg border border-amber-400 bg-amber-100 px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                                >
+                                    Скрыть
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={cleanupLoading}
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    className="rounded-lg border border-red-300 bg-red-100 px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-200 disabled:opacity-50"
+                                >
+                                    Удалить безвозвратно
+                                </button>
+                            </div>
+                            <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-amber-200 pt-4">
+                                <label className="flex cursor-pointer items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={showHidden}
+                                        onChange={(e) => setShowHidden(e.target.checked)}
+                                        className="h-4 w-4 rounded text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <span className="text-sm font-medium text-gray-700">Показать скрытые отчёты</span>
+                                </label>
+                                {lastHiddenIds.length > 0 && (
+                                    <button
+                                        type="button"
+                                        disabled={cleanupLoading}
+                                        onClick={async () => {
+                                            setCleanupLoading(true)
+                                            try {
+                                                await unhideFires(lastHiddenIds)
+                                                setLastHiddenIds([])
+                                                await loadSites()
+                                                setCleanupLoading(false)
+                                            } catch (e) {
+                                                console.error(e)
+                                                setCleanupLoading(false)
+                                            }
+                                        }}
+                                        className="rounded-lg border border-green-300 bg-green-100 px-4 py-2 text-sm font-medium text-green-800 hover:bg-green-200 disabled:opacity-50"
+                                    >
+                                        Отменить скрытие ({lastHiddenIds.length})
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Модалка подтверждения удаления */}
+                    {showDeleteConfirm && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
+                            <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 shadow-xl">
+                                <h4 className="mb-2 text-lg font-semibold text-gray-900">Вы уверены?</h4>
+                                <p className="mb-4 text-sm text-gray-600">
+                                    Все отчёты старше {cleanupOlderThan} {cleanupUnit === 'minutes' && 'минут'}
+                                    {cleanupUnit === 'hours' && 'часов'}
+                                    {cleanupUnit === 'days' && 'дней'}
+                                    {cleanupUnit === 'weeks' && 'недель'}
+                                    {cleanupUnit === 'months' && 'месяцев'} будут удалены безвозвратно. Это действие нельзя отменить.
+                                </p>
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowDeleteConfirm(false)}
+                                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                                    >
+                                        Отмена
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={cleanupLoading}
+                                        onClick={async () => {
+                                            setCleanupLoading(true)
+                                            try {
+                                                await deleteFiresByAge(cleanupOlderThan, cleanupUnit)
+                                                setShowDeleteConfirm(false)
+                                                await loadSites()
+                                            } catch (e) {
+                                                console.error(e)
+                                            } finally {
+                                                setCleanupLoading(false)
+                                            }
+                                        }}
+                                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                    >
+                                        Удалить
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Список пожаров */}
                     {sites.length === 0 ? (
                         <div className="py-16 text-center">
@@ -1130,23 +1304,25 @@ const FireList = () => {
 
                                         <div className="flex-1 p-6">
                                             <div className="mb-4 flex items-start justify-between">
-                                                <h3 className="flex items-center gap-2 text-xl font-bold text-gray-800">
-                                                    <span>
+                                                <div>
+                                                    <p className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-400">
+                                                        Отчёт №{String(site.id)}
+                                                        {site.hidden && (
+                                                            <span className="rounded bg-gray-300 px-1.5 py-0.5 text-gray-600 normal-case">Скрыт</span>
+                                                        )}
+                                                    </p>
+                                                    <h3 className="flex items-center gap-2 text-xl font-bold text-gray-800">
                                                         📍 {site.location}
                                                         {site.session_name && (
-                                                            <span className="ml-2 text-sm font-normal text-gray-500">
+                                                            <span className="text-sm font-normal text-gray-500">
                                                                 ({site.session_name})
                                                             </span>
                                                         )}
-                                                    </span>
-                                                    {approvedSites.has(
-                                                        site.id
-                                                    ) && (
-                                                        <div className="animate-sparkle ml-2 text-green-600">
-                                                            ✨
-                                                        </div>
-                                                    )}
-                                                </h3>
+                                                        {approvedSites.has(site.id) && (
+                                                            <span className="animate-sparkle text-green-600">✨</span>
+                                                        )}
+                                                    </h3>
+                                                </div>
                                                 <div
                                                     className={`rounded-full px-3 py-1 text-xl font-bold transition-all duration-200 hover:scale-105 ${
                                                         Math.round(site.conf) >=
@@ -1213,67 +1389,50 @@ const FireList = () => {
                                                     </p>
                                                 </div>
                                             )}
-                                        </div>
 
-                                        {/* Кнопка одобрения */}
-                                        <div className="absolute right-4 bottom-4">
+                                            {/* Полоса подтверждения — удобная зона нажатия */}
                                             <button
-                                                onClick={(e) =>
-                                                    handleApproval(site.id, e)
-                                                }
-                                                className={`approval-button group relative flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all duration-300 ${
+                                                type="button"
+                                                onClick={(e) => handleApproval(site.id, e)}
+                                                className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium transition-all duration-200 ${
                                                     approvedSites.has(site.id)
-                                                        ? 'bg-gradient-to-r from-green-500 to-green-600 text-white'
-                                                        : 'bg-white text-gray-500 hover:text-green-600'
-                                                } ${
-                                                    animatingApprovals.has(
-                                                        site.id
-                                                    )
-                                                        ? 'animate-approval-pulse'
-                                                        : ''
-                                                }`}
-                                                title={
-                                                    approvedSites.has(site.id)
-                                                        ? 'Отменить подтверждение'
-                                                        : 'Подтвердить как реальный пожар'
-                                                }
+                                                        ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-green-700'
+                                                } ${animatingApprovals.has(site.id) ? 'animate-approval-pulse' : ''}`}
+                                                title={approvedSites.has(site.id) ? 'Снять подтверждение' : 'Подтвердить как реальный пожар'}
                                             >
                                                 {approvedSites.has(site.id) ? (
-                                                    <div className="approved relative">
-                                                        <svg
-                                                            className="h-6 w-6"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            viewBox="0 0 24 24"
-                                                        >
-                                                            <path
-                                                                className="checkmark-path"
-                                                                strokeLinecap="round"
-                                                                strokeLinejoin="round"
-                                                                strokeWidth={3}
-                                                                d="M5 13l4 4L19 7"
-                                                            />
+                                                    <>
+                                                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                                                         </svg>
-                                                    </div>
+                                                        Подтверждено
+                                                    </>
                                                 ) : (
-                                                    <svg
-                                                        className="h-6 w-6 transition-transform duration-200 group-hover:scale-110"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        viewBox="0 0 24 24"
-                                                    >
-                                                        <path
-                                                            strokeLinecap="round"
-                                                            strokeLinejoin="round"
-                                                            strokeWidth={2}
-                                                            d="M5 13l4 4L19 7"
-                                                        />
-                                                    </svg>
+                                                    <>
+                                                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                        Подтвердить отчёт
+                                                    </>
                                                 )}
-
-                                                {/* Эффект ряби при клике */}
-                                                <div className="absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-active:bg-white group-active:opacity-30"></div>
                                             </button>
+                                            {site.hidden && (
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        try {
+                                                            await unhideFire(site.id)
+                                                            await loadSites()
+                                                        } catch (e) {
+                                                            console.error(e)
+                                                        }
+                                                    }}
+                                                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-green-300 bg-green-50 py-2.5 text-sm font-medium text-green-800 hover:bg-green-100"
+                                                >
+                                                    Вернуть в список
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
