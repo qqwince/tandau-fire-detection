@@ -1,7 +1,19 @@
 import cv2
 import os
-from ultralytics import YOLO
 import threading
+
+# Патч совместимости: чекпоинт best.pt мог быть сохранён с E2ELoss (старая версия ultralytics)
+import ultralytics.utils.loss as _uloss
+if not hasattr(_uloss, 'E2ELoss'):
+    try:
+        from ultralytics.utils.loss import v8DetectionLoss
+        _uloss.E2ELoss = v8DetectionLoss
+    except ImportError:
+        class E2ELoss:
+            pass
+        _uloss.E2ELoss = E2ELoss
+
+from ultralytics import YOLO
 import time
 from site_sender import send_to_site, ensure_configuration_interactive, FatalConfigError
 from ptz import start_ptz_sweeper_if_configured
@@ -11,12 +23,12 @@ from telegram_sender import send_telegram_photo
 CONFIG = {
     'skip_frames': False,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
     'reduce_quality': True,  # Включить/выключить понижение качества
-    'quality_scale': 1,  # Масштаб качества (0.5 = 50% от оригинала)
+    'quality_scale': 0.4,  # Масштаб качества (0.5 = 50% от оригинала)
     'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
-    'detection_confidence': 0.4,  # Порог уверенности для детекции
+    'detection_confidence': 0.2,  # Порог уверенности для детекции
 }
 
-model = YOLO("best.pt")
+model = YOLO("best123.pt")
 save_path = "fire_detections/"
 os.makedirs(save_path, exist_ok=True)
 
@@ -265,9 +277,9 @@ if __name__ == "__main__":
 
     # Список камер
     cameras = [
-        #(0, "Камера №1"),
-        #(1, "Камера №2"),
-        ("./fire1.mp4", "Камера №3"),
+        ("./fire1.mp4", "Камера №1"),
+        ("./fire2.mp4", "Камера №2"),
+        #("./fire3.mp4", "Камера №3"),
         #("rtsp://admin:L238872B@192.168.100.175:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
     ]
 

@@ -319,14 +319,19 @@ def set_fire_approved(request, fire_id: int):
 
 
 def _parse_older_than(request):
-    """Вернуть (cutoff_datetime, error_response) или (cutoff, None)."""
+    """Вернуть (cutoff_datetime, error_response) или (cutoff, None). Читает older_than и unit из GET или body."""
+    data = getattr(request, 'data', None) or {}
+    raw_n = request.GET.get('older_than') or data.get('older_than')
+    if raw_n is None:
+        return None, Response({'error': 'older_than is required'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        n = int(request.GET.get('older_than') or request.data.get('older_than', 0))
+        n = int(raw_n)
     except (TypeError, ValueError):
         return None, Response({'error': 'older_than must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
     if n <= 0:
         return None, Response({'error': 'older_than must be positive'}, status=status.HTTP_400_BAD_REQUEST)
-    unit = (request.GET.get('unit') or request.data.get('unit') or 'days').strip().lower()
+    unit = request.GET.get('unit') or data.get('unit') or 'days'
+    unit = str(unit).strip().lower()
     unit_map = {
         'minute': timedelta(minutes=1),
         'minutes': timedelta(minutes=1),
@@ -338,25 +343,37 @@ def _parse_older_than(request):
         'weeks': timedelta(weeks=1),
         'month': timedelta(days=30),
         'months': timedelta(days=30),
+        'year': timedelta(days=365),
+        'years': timedelta(days=365),
     }
     delta = unit_map.get(unit)
     if not delta:
-        return None, Response({'error': 'unit must be: minutes, hours, days, weeks, months'}, status=status.HTTP_400_BAD_REQUEST)
+        return None, Response({'error': 'unit must be: minutes, hours, days, weeks, months, years'}, status=status.HTTP_400_BAD_REQUEST)
     cutoff = timezone.now() - (delta * n)
     return cutoff, None
+
+
+def _time_filter_for_age(cutoff):
+    """Условие по времени: старше cutoff ИЛИ явно «будущее» время (ошибочная метка из-за локального времени без таймзоны)."""
+    now = timezone.now()
+    # Отчёты с time > now + 1 минута считаем сломанными (детектор слал локальное время как UTC) — тоже скрываем/удаляем по возрасту
+    future_threshold = now + timedelta(minutes=1)
+    return Q(time__lt=cutoff) | Q(time__gt=future_threshold)
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def hide_fires_by_age(request):
-    """Скрыть отчёты старше N единиц времени (из своих сессий). Возвращает hidden_ids для отмены."""
+    """Скрыть отчёты старше N единиц времени (из своих сессий + без сессии). Возвращает hidden_ids для отмены."""
     allowed_session_ids = _session_ids_for_user(request.user)
     cutoff, err = _parse_older_than(request)
     if err:
         return err
+    # Свои сессии + отчёты без сессии (session_id=None), чтобы учитывать старые/сиротские отчёты
+    session_filter = Q(session_id__in=allowed_session_ids) | Q(session_id__isnull=True)
     qs = Fire.objects.filter(
-        session_id__in=allowed_session_ids,
-        time__lt=cutoff,
+        session_filter,
+        _time_filter_for_age(cutoff),
         hidden=False,
     )
     hidden_ids = list(qs.values_list('id', flat=True))
@@ -367,14 +384,15 @@ def hide_fires_by_age(request):
 @api_view(['DELETE', 'POST'])
 @permission_classes([IsAuthenticated])
 def delete_fires_by_age(request):
-    """Безвозвратно удалить отчёты старше N единиц времени (из своих сессий). DELETE/POST ?older_than=N&unit=days."""
+    """Безвозвратно удалить отчёты старше N единиц времени (из своих сессий + без сессии)."""
     allowed_session_ids = _session_ids_for_user(request.user)
     cutoff, err = _parse_older_than(request)
     if err:
         return err
+    session_filter = Q(session_id__in=allowed_session_ids) | Q(session_id__isnull=True)
     deleted, _ = Fire.objects.filter(
-        session_id__in=allowed_session_ids,
-        time__lt=cutoff,
+        session_filter,
+        _time_filter_for_age(cutoff),
     ).delete()
     return Response({'deleted_count': deleted}, status=status.HTTP_200_OK)
 

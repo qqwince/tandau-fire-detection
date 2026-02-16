@@ -52,12 +52,13 @@ export async function setFireApproved(fireId: string | number, approved: boolean
 }
 
 /** Единицы возраста для очистки */
-export type CleanupUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months'
+export type CleanupUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months' | 'years'
 
 /** Скрыть отчёты старше N единиц (из своих сессий). Возвращает hidden_ids для отмены. */
 export async function hideFiresByAge(olderThan: number, unit: CleanupUnit): Promise<{ hidden_count: number; hidden_ids: number[] }> {
     const { data } = await $host.post(
-        `/api/fires/hide-by-age/?older_than=${olderThan}&unit=${unit}`
+        `/api/fires/hide-by-age/?older_than=${olderThan}&unit=${unit}`,
+        { older_than: olderThan, unit }
     )
     return data
 }
@@ -78,7 +79,8 @@ export async function unhideFires(fireIds: number[]): Promise<{ unhidden_count: 
 /** Безвозвратно удалить отчёты старше N единиц (из своих сессий). */
 export async function deleteFiresByAge(olderThan: number, unit: CleanupUnit): Promise<{ deleted_count: number }> {
     const { data } = await $host.post(
-        `/api/fires/delete-by-age/?older_than=${olderThan}&unit=${unit}`
+        `/api/fires/delete-by-age/?older_than=${olderThan}&unit=${unit}`,
+        { older_than: olderThan, unit }
     )
     return data
 }

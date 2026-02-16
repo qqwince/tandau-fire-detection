@@ -69,6 +69,7 @@ const FireList = () => {
     const [cleanupUnit, setCleanupUnit] = useState<CleanupUnit>('days')
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [cleanupLoading, setCleanupLoading] = useState(false)
+    const [cleanupMessage, setCleanupMessage] = useState<string | null>(null)
     const [showHidden, setShowHidden] = useState(false)
     /** ID отчётов, скрытых последним действием «Скрыть» — для кнопки «Отменить скрытие» */
     const [lastHiddenIds, setLastHiddenIds] = useState<number[]>([])
@@ -1158,6 +1159,7 @@ const FireList = () => {
                                         <option value="days">дней</option>
                                         <option value="weeks">недель</option>
                                         <option value="months">месяцев</option>
+                                        <option value="years">лет</option>
                                     </select>
                                 </label>
                                 <button
@@ -1165,13 +1167,20 @@ const FireList = () => {
                                     disabled={cleanupLoading}
                                     onClick={async () => {
                                         setCleanupLoading(true)
+                                        setCleanupMessage(null)
                                         try {
                                             const { hidden_count, hidden_ids } = await hideFiresByAge(cleanupOlderThan, cleanupUnit)
                                             setLastHiddenIds(hidden_ids || [])
                                             if (hidden_count > 0) await loadSites()
-                                            setCleanupLoading(false)
-                                        } catch (e) {
+                                            setCleanupMessage(hidden_count > 0 ? `Скрыто отчётов: ${hidden_count}` : 'Нет отчётов старше указанного срока')
+                                            setTimeout(() => setCleanupMessage(null), 4000)
+                                        } catch (e: unknown) {
+                                            const err = e as { response?: { data?: { error?: string } } }
+                                            const msg = err?.response?.data?.error || (e instanceof Error ? e.message : 'Ошибка')
+                                            setCleanupMessage(`Ошибка: ${msg}`)
+                                            setTimeout(() => setCleanupMessage(null), 5000)
                                             console.error(e)
+                                        } finally {
                                             setCleanupLoading(false)
                                         }
                                     }}
@@ -1219,6 +1228,11 @@ const FireList = () => {
                                         Отменить скрытие ({lastHiddenIds.length})
                                     </button>
                                 )}
+                                {cleanupMessage && (
+                                    <p className={`text-sm ${cleanupMessage.startsWith('Ошибка') ? 'text-red-600' : 'text-gray-700'}`}>
+                                        {cleanupMessage}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}
@@ -1233,7 +1247,8 @@ const FireList = () => {
                                     {cleanupUnit === 'hours' && 'часов'}
                                     {cleanupUnit === 'days' && 'дней'}
                                     {cleanupUnit === 'weeks' && 'недель'}
-                                    {cleanupUnit === 'months' && 'месяцев'} будут удалены безвозвратно. Это действие нельзя отменить.
+                                    {cleanupUnit === 'months' && 'месяцев'}
+                                    {cleanupUnit === 'years' && 'лет'} будут удалены безвозвратно. Это действие нельзя отменить.
                                 </p>
                                 <div className="flex justify-end gap-2">
                                     <button
@@ -1248,11 +1263,18 @@ const FireList = () => {
                                         disabled={cleanupLoading}
                                         onClick={async () => {
                                             setCleanupLoading(true)
+                                            setCleanupMessage(null)
                                             try {
-                                                await deleteFiresByAge(cleanupOlderThan, cleanupUnit)
+                                                const { deleted_count } = await deleteFiresByAge(cleanupOlderThan, cleanupUnit)
                                                 setShowDeleteConfirm(false)
-                                                await loadSites()
-                                            } catch (e) {
+                                                if (deleted_count > 0) await loadSites()
+                                                setCleanupMessage(deleted_count > 0 ? `Удалено отчётов: ${deleted_count}` : 'Нет отчётов старше указанного срока')
+                                                setTimeout(() => setCleanupMessage(null), 4000)
+                                            } catch (e: unknown) {
+                                                const err = e as { response?: { data?: { error?: string } } }
+                                                const msg = err?.response?.data?.error || (e instanceof Error ? e.message : 'Ошибка')
+                                                setCleanupMessage(`Ошибка: ${msg}`)
+                                                setTimeout(() => setCleanupMessage(null), 5000)
                                                 console.error(e)
                                             } finally {
                                                 setCleanupLoading(false)

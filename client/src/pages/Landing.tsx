@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import natureVideo from '@/assets/natureVideo.mp4'
+import outputVideo from '@/assets/output.mp4'
 import { Link } from 'react-router-dom'
 
 function Landing() {
@@ -52,7 +52,7 @@ function Landing() {
         {
             icon: '🎯',
             title: 'Высокая точность',
-            description: 'Точность детекции до 99.9% благодаря обученным нейронным сетям на тысячах примеров',
+            description: 'Точность детекции показывает отличные результаты благодаря обученным нейронным сетям на тысячах примеров',
         },
         {
             icon: '📱',
@@ -60,7 +60,7 @@ function Landing() {
             description: 'Автоматическая отправка уведомлений в Telegram при обнаружении пожара для оперативного реагирования',
         },
         {
-            icon: '👥',
+            icon: '🤝',
             title: 'Командная работа',
             description: 'Система сессий позволяет командам работать совместно, управлять доступом и отслеживать все действия',
         },
@@ -104,7 +104,7 @@ function Landing() {
             {/* Hero Section */}
             <section className="relative flex min-h-[90vh] w-full items-center justify-center overflow-hidden">
                 <video
-                    src={natureVideo}
+                    src={outputVideo}
                     autoPlay
                     loop
                     muted
@@ -131,7 +131,7 @@ function Landing() {
                     </p>
 
                     <div className="flex flex-col items-center gap-2">
-                        <span className="text-sm font-medium uppercase tracking-widest text-white/70">Мы</span>
+                        <span className="text-3xl font-medium uppercase tracking-widest text-white/70">Мы</span>
                         <AnimatePresence mode="wait">
                             <motion.span
                                 key={phrases[index]}
@@ -219,7 +219,7 @@ function Landing() {
                     >
                         <span className="text-sm font-semibold uppercase tracking-wider text-red-600">Преимущества</span>
                         <h2 className="mt-3 text-4xl font-bold tracking-tight text-gray-900 md:text-5xl">
-                            Почему выбирают нас
+                             Преимущества системы
                         </h2>
                         <p className="mx-auto mt-4 max-w-2xl text-lg text-gray-600">
                             Всё необходимое для надёжного мониторинга пожаров
@@ -311,10 +311,10 @@ function Landing() {
                         transition={{ duration: 0.6 }}
                     >
                         {[
-                            { value: '99.9%', label: 'Точность детекции' },
+                            { value: 'Высокая', label: 'Точность детекции' },
                             { value: '< 2 сек', label: 'Время обнаружения' },
                             { value: '24/7', label: 'Непрерывный мониторинг' },
-                            { value: '∞', label: 'Количество камер' },
+                            { value: '∞', label: 'Неограниченное количество камер' },
                         ].map((stat, index) => (
                             <motion.div
                                 key={index}

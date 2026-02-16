@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 SITE_API_URL = "http://127.0.0.1:8000/api/fire/"  # адрес при локальной работе
 
@@ -115,7 +115,7 @@ def ensure_configuration_interactive() -> None:
 
 
 def send_to_site(image_path, location, conf):
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     lat, lon = CAMERA_COORDINATES.get(location, (None, None))
 
     if lat is None or lon is None:
