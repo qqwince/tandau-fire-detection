@@ -300,8 +300,8 @@ function Landing() {
             </section>
 
             {/* Stats Section */}
-            <section className="relative overflow-hidden bg-gradient-to-br from-red-600 via-red-500 to-orange-600 py-24">
-                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNiI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-60" />
+            <section className="relative overflow-hidden bg-gradient-to-br from-slate-600 via-slate-500 to-slate-600 py-24">
+                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wOCI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
                 <div className="relative mx-auto max-w-7xl px-4">
                     <motion.div
                         className="grid grid-cols-2 gap-12 md:grid-cols-4"
@@ -346,7 +346,7 @@ function Landing() {
                         viewport={{ once: true }}
                         transition={{ duration: 0.6 }}
                     >
-                        <span className="text-sm font-semibold uppercase tracking-wider text-red-600">Стек</span>
+                        <span className="text-sm font-semibold uppercase tracking-wider text-slate-600">Стек</span>
                         <h2 className="mt-3 text-4xl font-bold tracking-tight text-gray-900 md:text-5xl">
                             Технологии
                         </h2>
@@ -356,7 +356,7 @@ function Landing() {
                     </motion.div>
                     <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
                         {[
-                            { name: 'YOLO', description: 'Нейронные сети для детекции объектов', color: 'from-red-500 to-red-600', shadow: 'shadow-red-500/25' },
+                            { name: 'YOLO', description: 'Нейронные сети для детекции объектов', color: 'from-slate-500 to-slate-600', shadow: 'shadow-slate-500/25' },
                             { name: 'React', description: 'Современный фронтенд-фреймворк', color: 'from-blue-500 to-blue-600', shadow: 'shadow-blue-500/25' },
                             { name: 'Django', description: 'Мощный backend на Python', color: 'from-emerald-500 to-emerald-600', shadow: 'shadow-emerald-500/25' },
                             { name: 'TypeScript', description: 'Типобезопасная разработка', color: 'from-blue-400 to-blue-500', shadow: 'shadow-blue-400/25' },
@@ -383,8 +383,8 @@ function Landing() {
             </section>
 
             {/* CTA Section */}
-            <section className="relative overflow-hidden bg-gradient-to-br from-red-600 via-red-500 to-orange-600 py-24">
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_120%,rgba(0,0,0,0.15),transparent)]" />
+            <section className="relative overflow-hidden bg-gradient-to-br from-slate-600 via-slate-500 to-slate-600 py-24">
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_120%,rgba(71,85,105,0.2),transparent)]" />
                 <div className="relative mx-auto max-w-3xl px-4 text-center">
                     <motion.div
                         initial={{ opacity: 0, y: 24 }}
@@ -402,7 +402,7 @@ function Landing() {
                             <motion.button
                                 whileHover={{ scale: 1.03 }}
                                 whileTap={{ scale: 0.98 }}
-                                className="rounded-2xl bg-white px-10 py-4 text-lg font-bold text-red-600 shadow-2xl shadow-black/20 transition hover:bg-gray-50"
+                                className="rounded-2xl bg-white px-10 py-4 text-lg font-bold text-slate-700 shadow-2xl shadow-black/20 transition hover:bg-gray-50"
                             >
                                 Перейти к мониторингу →
                             </motion.button>
