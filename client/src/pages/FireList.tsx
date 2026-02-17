@@ -1389,13 +1389,9 @@ const FireList = () => {
                                                             Координаты
                                                         </p>
                                                         <p className="font-mono font-medium">
-                                                            {site.latitude.toFixed(
-                                                                4
-                                                            )}
-                                                            ,{' '}
-                                                            {site.longitude.toFixed(
-                                                                4
-                                                            )}
+                                                            {site.latitude == null || site.longitude == null
+                                                                ? '—'
+                                                                : `${site.latitude.toFixed(4)}, ${site.longitude.toFixed(4)}`}
                                                         </p>
                                                     </div>
                                                 </div>

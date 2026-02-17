@@ -3,8 +3,8 @@ export interface FireSite {
     location: string
     time: string
     description?: string
-    latitude: number
-    longitude: number
+    latitude: number | null
+    longitude: number | null
     image?: string
     conf: number
     session_name?: string

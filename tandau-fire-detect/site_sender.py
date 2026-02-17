@@ -2,7 +2,16 @@ import os
 import requests
 from datetime import datetime, timezone
 
-SITE_API_URL = "http://127.0.0.1:8000/api/fire/"  # адрес при локальной работе
+SITE_API_URL = "http://127.0.0.1:8000/api/fire/"  # адрес при локальной работе (можно переопределить env FIRE_SITE_API_URL)
+
+
+def _get_site_api_url() -> str:
+    """
+    URL для отправки отчёта на сайт.
+    Переопределение: переменная окружения FIRE_SITE_API_URL.
+    """
+    url = (os.getenv("FIRE_SITE_API_URL") or "").strip()
+    return url or SITE_API_URL
 
 
 class FatalConfigError(Exception):
@@ -118,18 +127,18 @@ def send_to_site(image_path, location, conf):
     now = datetime.now(timezone.utc).isoformat()
     lat, lon = CAMERA_COORDINATES.get(location, (None, None))
 
-    if lat is None or lon is None:
-        print(f"⚠️ Неизвестные координаты для {location}, данные не отправлены.")
-        return
-
     data = {
         "location": location,
         "time": now,
         "description": f"Автоматическое обнаружение на {location}",
-        "latitude": lat,
-        "longitude": lon,
         "conf": conf*100,
     }
+    # Координаты необязательны: если неизвестны — просто не отправляем их
+    if lat is not None and lon is not None:
+        data["latitude"] = lat
+        data["longitude"] = lon
+    else:
+        print(f"⚠️ Неизвестные координаты для {location} — отправляю без lat/lon.")
 
     token = _get_access_token()
     session_id = _get_session_id()
@@ -146,8 +155,9 @@ def send_to_site(image_path, location, conf):
         if token:
             headers["Authorization"] = f"Bearer {token}"
         else:
-            print("❌ Токен не найден. Установите FIRE_API_TOKEN / ACCESS_TOKEN или положите token.txt рядом со скриптом.")
-            raise FatalConfigError("Не настроен токен доступа для отправки данных на сайт.")
+            # API приёма отчётов на сервере сейчас открыт (AllowAny), поэтому токен не обязателен.
+            # Но оставляем предупреждение, чтобы было понятно, почему могут не работать другие API.
+            print("⚠️ Токен не найден (token.txt / FIRE_API_TOKEN). Отправляю без авторизации.")
 
         if session_id is not None:
             data["session"] = session_id
@@ -157,7 +167,9 @@ def send_to_site(image_path, location, conf):
             print("❌ ID/код сессии не задан. Установите FIRE_SESSION_ID / FIRE_SESSION_CODE или создайте session.txt.")
             raise FatalConfigError("Не задана сессия для привязки детекций.")
 
-        response = requests.post(SITE_API_URL, data=data, files=files, headers=headers)
+        url = _get_site_api_url()
+        print(f"→ POST {url} (session={data.get('session')}, join_code={data.get('join_code')}, location='{location}')")
+        response = requests.post(url, data=data, files=files, headers=headers, timeout=15)
         if response.status_code == 201:
             print(f"✅ Данные и изображение с {location} отправлены на сайт.")
         else:
