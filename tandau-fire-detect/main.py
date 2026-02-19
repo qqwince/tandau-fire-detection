@@ -23,12 +23,12 @@ from telegram_sender import send_telegram_photo
 CONFIG = {
     'skip_frames': False,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
     'reduce_quality': True,  # Включить/выключить понижение качества
-    'quality_scale': 0.4,  # Масштаб качества (0.5 = 50% от оригинала)
+    'quality_scale': 1,  # Масштаб качества (0.5 = 50% от оригинала)
     'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
     'detection_confidence': 0.2,  # Порог уверенности для детекции
 }
 
-model = YOLO("best123.pt")
+model = YOLO("1702_1420.pt")
 save_path = "fire_detections/"
 os.makedirs(save_path, exist_ok=True)
 
@@ -277,10 +277,9 @@ if __name__ == "__main__":
 
     # Список камер
     cameras = [
-        ("./fire1.mp4", "Камера №1"),
-        ("./fire2.mp4", "Камера №2"),
-        #("./fire3.mp4", "Камера №3"),
-        #("rtsp://admin:L238872B@192.168.100.175:554/cam/realmonitor?channel=1&subtype=1", "Камера IP"),
+        ("./fire4.mp4", "Камера №4"),
+        ("./fire5.mp4", "Камера №5"),
+        ("./fire6.mp4", "Камера №6"),
     ]
 
     threads = []

@@ -76,7 +76,9 @@ export const FireCard: React.FC<FireCardProps> = ({
                             <div>
                                 <p className="text-sm text-gray-500">Координаты</p>
                                 <p className="font-mono font-medium">
-                                    {site.latitude.toFixed(4)}, {site.longitude.toFixed(4)}
+                                    {site.latitude == null || site.longitude == null
+                                        ? '—'
+                                        : `${site.latitude.toFixed(4)}, ${site.longitude.toFixed(4)}`}
                                 </p>
                             </div>
                         </div>
