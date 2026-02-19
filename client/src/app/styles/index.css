@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap');
+
+:root {
+    --color-brand: 239 68 68;
+    --color-brand-dark: 185 28 28;
+    --color-accent: 249 115 22;
+    --color-surface: 250 250 250;
+    --shadow-soft: 0 4px 24px -4px rgb(0 0 0 / 0.06);
+    --shadow-card: 0 10px 40px -10px rgb(0 0 0 / 0.1);
+    --shadow-glow: 0 0 60px -12px rgb(239 68 68 / 0.35);
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: "Manrope", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Outfit", "Manrope", sans-serif;
+    letter-spacing: -0.02em;
+}
+
+button, a:hover {
+    cursor: pointer;
+}

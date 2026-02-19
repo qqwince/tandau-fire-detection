@@ -1,7 +1,7 @@
 import React from 'react'
-import type { FireSite } from '../types'
+import type { FireSite } from '@/entities/fire'
 
-interface Props {
+interface FireCardProps {
     site: FireSite
     onOpenImage: (url: string) => void
     approved: boolean
@@ -9,12 +9,20 @@ interface Props {
     onToggleApprove: (id: string, e: React.MouseEvent) => void
 }
 
-export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animating, onToggleApprove }) => {
+export const FireCard: React.FC<FireCardProps> = ({
+    site,
+    onOpenImage,
+    approved,
+    animating,
+    onToggleApprove,
+}) => {
     const base = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
     return (
         <div
             className={`animate-slide-up overflow-hidden rounded-2xl border shadow-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-xl ${
-                approved ? 'border-green-300 bg-gradient-to-br from-green-50 to-white' : 'border-gray-200 bg-white'
+                approved
+                    ? 'border-green-300 bg-gradient-to-br from-green-50 to-white'
+                    : 'border-gray-200 bg-white'
             }`}
         >
             <div className="relative flex flex-col lg:flex-row">
@@ -32,8 +40,10 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
                 <div className="flex-1 p-6">
                     <div className="mb-4 flex items-start justify-between">
                         <h3 className="flex items-center gap-2 text-xl font-bold text-gray-800">
-                            📍 {site.location }
-                            {approved && <div className="animate-sparkle ml-2 text-green-600">✨</div>}
+                            📍 {site.location}
+                            {approved && (
+                                <div className="animate-sparkle ml-2 text-green-600">✨</div>
+                            )}
                         </h3>
                         <div
                             className={`rounded-full px-3 py-1 text-xl font-bold transition-all duration-200 hover:scale-105 ${
@@ -42,8 +52,8 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
                                     : Math.round(site.conf) >= 60
                                       ? 'bg-orange-100 text-orange-800'
                                       : Math.round(site.conf) >= 40
-                                          ? 'bg-yellow-100 text-yellow-800'
-                                          : 'bg-gray-100 text-gray-800'
+                                        ? 'bg-yellow-100 text-yellow-800'
+                                        : 'bg-gray-100 text-gray-800'
                             }`}
                         >
                             {Math.round(site.conf)}%
@@ -84,19 +94,46 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
                     <button
                         onClick={(e) => onToggleApprove(site.id, e)}
                         className={`approval-button group relative flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all duration-300 ${
-                            approved ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' : 'bg-white text-gray-500 hover:text-green-600'
+                            approved
+                                ? 'bg-gradient-to-r from-green-500 to-green-600 text-white'
+                                : 'bg-white text-gray-500 hover:text-green-600'
                         } ${animating ? 'animate-approval-pulse' : ''}`}
-                        title={approved ? 'Отменить подтверждение' : 'Подтвердить как реальный пожар'}
+                        title={
+                            approved
+                                ? 'Отменить подтверждение'
+                                : 'Подтвердить как реальный пожар'
+                        }
                     >
                         {approved ? (
                             <div className="approved relative">
-                                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path className="checkmark-path" strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                <svg
+                                    className="h-6 w-6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        className="checkmark-path"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={3}
+                                        d="M5 13l4 4L19 7"
+                                    />
                                 </svg>
                             </div>
                         ) : (
-                            <svg className="h-6 w-6 transition-transform duration-200 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            <svg
+                                className="h-6 w-6 transition-transform duration-200 group-hover:scale-110"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M5 13l4 4L19 7"
+                                />
                             </svg>
                         )}
                         <div className="absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-active:bg-white group-active:opacity-30"></div>
@@ -106,5 +143,3 @@ export const FireCard: React.FC<Props> = ({ site, onOpenImage, approved, animati
         </div>
     )
 }
-
-

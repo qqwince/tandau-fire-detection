@@ -1,6 +1,7 @@
 import requests
 import threading
 from datetime import datetime
+from site_sender import get_computer_coordinates
 
 TOKEN = "7737693112:AAHE0iaX8El7RoVsuz0FO_8t40cMMHPF96A"
 CHAT_ID = "7514218752"
@@ -10,7 +11,15 @@ TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 def _send_photo_with_message(photo_path):
     try:
         current_time = datetime.now().strftime("%H:%M:%S")
-        message = f"🔥 Огонь обнаружен!\n🕒 Время: {current_time}\n📍 Координаты: неизвестны"
+        
+        # Получаем реальные координаты компьютера
+        lat, lon = get_computer_coordinates()
+        if lat is not None and lon is not None:
+            coords_text = f"{lat:.6f}, {lon:.6f}"
+        else:
+            coords_text = "неизвестны"
+        
+        message = f"🔥 Огонь обнаружен!\n🕒 Время: {current_time}\n📍 Координаты: {coords_text}"
 
         with open(photo_path, "rb") as photo_file:
             response = requests.post(TELEGRAM_URL, data={

@@ -9,12 +9,71 @@ class FatalConfigError(Exception):
     """Критическая ошибка конфигурации (неверный токен/сессия) — работу ИИ нужно остановить."""
     pass
 
-# можно заранее задать координаты камер:
+# Кэш для координат компьютера (чтобы не запрашивать каждый раз)
+_computer_coordinates_cache = None
+
+# можно заранее задать координаты камер (используются как fallback, если не удалось определить реальные):
 CAMERA_COORDINATES = {
     "Камера №1": (53.279068, 69.3852623),  # МШГ №5
     "Камера №2": (59.9343, 30.3351),  # Санкт-Петербург
     "Камера №3": (56.8389, 60.6057),  # Екатеринбург
 }
+
+
+def get_computer_coordinates():
+    """
+    Определяет реальные координаты компьютера по его внешнему IP-адресу.
+    Использует бесплатные API для геолокации.
+    Возвращает (latitude, longitude) или (None, None) при ошибке.
+    """
+    global _computer_coordinates_cache
+    
+    # Если координаты уже были получены, возвращаем из кэша
+    if _computer_coordinates_cache is not None:
+        return _computer_coordinates_cache
+    
+    # Пробуем несколько бесплатных API по очереди
+    apis = [
+        # ip-api.com (бесплатно до 45 запросов/минуту)
+        {
+            'url': 'http://ip-api.com/json/',
+            'parse': lambda r: (r.json().get('lat'), r.json().get('lon')) if r.status_code == 200 and r.json().get('status') == 'success' else (None, None)
+        },
+        # geojs.io (бесплатно, без лимитов)
+        {
+            'url': 'https://get.geojs.io/v1/ip/geo.json',
+            'parse': lambda r: (float(r.json().get('latitude')), float(r.json().get('longitude'))) if r.status_code == 200 and r.json().get('latitude') and r.json().get('longitude') else (None, None)
+        },
+        # ipapi.co (бесплатно до 1000 запросов/день)
+        {
+            'url': 'https://ipapi.co/json/',
+            'parse': lambda r: (r.json().get('latitude'), r.json().get('longitude')) if r.status_code == 200 and r.json().get('latitude') and r.json().get('longitude') else (None, None)
+        },
+    ]
+    
+    for api in apis:
+        try:
+            response = requests.get(api['url'], timeout=5)
+            lat, lon = api['parse'](response)
+            
+            if lat is not None and lon is not None:
+                # Проверяем валидность координат
+                try:
+                    lat_float = float(lat)
+                    lon_float = float(lon)
+                    if -90 <= lat_float <= 90 and -180 <= lon_float <= 180:
+                        _computer_coordinates_cache = (lat_float, lon_float)
+                        print(f"✅ Определены координаты компьютера: {lat_float:.6f}, {lon_float:.6f}")
+                        return (lat_float, lon_float)
+                except (ValueError, TypeError):
+                    continue
+        except Exception as e:
+            print(f"⚠️ Ошибка при определении координат через {api['url']}: {e}")
+            continue
+    
+    print("⚠️ Не удалось определить координаты компьютера по IP. Будет использован fallback.")
+    return (None, None)
+
 
 def _get_access_token() -> str | None:
     # Читаем токен из переменной окружения или файла token.txt рядом со скриптом
@@ -116,10 +175,19 @@ def ensure_configuration_interactive() -> None:
 
 def send_to_site(image_path, location, conf):
     now = datetime.now(timezone.utc).isoformat()
-    lat, lon = CAMERA_COORDINATES.get(location, (None, None))
-
+    
+    # Пытаемся получить реальные координаты компьютера
+    lat, lon = get_computer_coordinates()
+    
+    # Если не удалось определить реальные координаты, используем fallback из CAMERA_COORDINATES
     if lat is None or lon is None:
-        print(f"⚠️ Неизвестные координаты для {location}, данные не отправлены.")
+        lat, lon = CAMERA_COORDINATES.get(location, (None, None))
+        if lat is not None and lon is not None:
+            print(f"ℹ️ Используются координаты из конфигурации для {location}: {lat}, {lon}")
+    
+    # Если и fallback не помог, не отправляем данные
+    if lat is None or lon is None:
+        print(f"⚠️ Не удалось определить координаты для {location}, данные не отправлены.")
         return
 
     data = {

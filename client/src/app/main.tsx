@@ -1,12 +1,14 @@
-import React, { StrictMode } from 'react'
+import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import '../index.css'
-import Landing from '../pages/Landing.tsx'
-import Login from '../pages/Login.tsx'
-import Header from '../shared/components/Header.tsx'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import FireList from '../pages/FireList.tsx'
-import { AuthProvider } from '../contexts/AuthContext'
+import '@/shared/api'
+import './styles/index.css'
+import './styles/fire-list.css'
+import { AuthProvider } from '@/features/auth'
+import { Header } from '@/widgets/header'
+import { LandingPage } from '@/pages/landing'
+import { LoginPage } from '@/pages/login'
+import { FireListPage } from '@/pages/fire-list'
 
 const router = createBrowserRouter([
     {
@@ -14,7 +16,7 @@ const router = createBrowserRouter([
         element: (
             <>
                 <Header />
-                <Landing />
+                <LandingPage />
             </>
         ),
     },
@@ -23,7 +25,7 @@ const router = createBrowserRouter([
         element: (
             <>
                 <Header />
-                <FireList />
+                <FireListPage />
             </>
         ),
     },
@@ -32,7 +34,7 @@ const router = createBrowserRouter([
         element: (
             <>
                 <Header />
-                <Login />
+                <LoginPage />
             </>
         ),
     },
