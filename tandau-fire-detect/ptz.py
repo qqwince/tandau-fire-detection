@@ -80,13 +80,17 @@ class OnvifPTZController:
         if not (host and username and password):
             raise ValueError("ONVIF config requires host, username, password")
 
-        self.pan_speed = float(cfg.get("pan_speed", 0.4))
+        self.pan_speed = float(cfg.get("pan_speed", 0.6))
         self.tilt_speed = float(cfg.get("tilt_speed", 0.0))
-        self.max_left = float(cfg.get("max_left", -1.0))  # Максимальная позиция влево
-        self.max_right = float(cfg.get("max_right", 1.0))  # Максимальная позиция вправо
-        self.max_up = float(cfg.get("max_up", 1.0))  # Максимальная позиция вверх
-        self.max_down = float(cfg.get("max_down", -1.0))  # Максимальная позиция вниз
-        self.timeout = float(cfg.get("timeout", 1.0))  # Используем timeout из основного конфига
+        self.max_left = float(cfg.get("max_left", -1.0))
+        self.max_right = float(cfg.get("max_right", 1.0))
+        self.max_up = float(cfg.get("max_up", 1.0))
+        self.max_down = float(cfg.get("max_down", -1.0))
+        self.timeout = float(cfg.get("timeout", 1.0))
+        # Длительность одного шага патруля (сек) — сколько двигать камеру влево/вправо
+        self.step_seconds = float(cfg.get("step_seconds", 8.0))
+        # "continuous" = плавное движение без пауз; "burst" = короткие рывки с паузами (под старые камеры)
+        self.move_style = str(cfg.get("move_style", "continuous")).lower() or "continuous"
 
         wsdl_dir = _get_wsdl_dir()
         if wsdl_dir:
@@ -114,39 +118,32 @@ class OnvifPTZController:
             self._continuous_move(1.0 if x > 0 else -1.0, 0.0)
 
     def _continuous_move(self, x: float, y: float) -> None:
+        """Движение в направлении (x, y) на step_seconds секунд. Плавный режим по умолчанию."""
+        total_time = max(0.5, self.step_seconds)
         try:
             req = self.ptz.create_type('ContinuousMove')
             req.ProfileToken = self.profile.token
             req.Velocity = {'PanTilt': {'x': x, 'y': y}}
-            
-            # Движение короткими рывками для четкого изображения
-            total_time = self.timeout
-            burst_duration = 0.5  # Длительность одного рывка
-            pause_duration = 0.3  # Пауза между рывками
-            cycle_time = burst_duration + pause_duration
-            
-            print(f"[PTZ/ONVIF] {self.name}: burst movement x={x} y={y} for {total_time}s (burst: {burst_duration}s, pause: {pause_duration}s)")
-            
-            elapsed = 0
-            burst_count = 0
-            
-            while elapsed < total_time:
-                # Рывок движения
-                print(f"[PTZ/ONVIF] {self.name}: burst #{burst_count + 1} - moving for {burst_duration}s")
+
+            if self.move_style == "burst":
+                burst_duration = 0.5
+                pause_duration = 0.2
+                cycle_time = burst_duration + pause_duration
+                print(f"[PTZ/ONVIF] {self.name}: burst movement x={x} y={y} for {total_time:.1f}s")
+                elapsed = 0
+                while elapsed < total_time:
+                    self.ptz.ContinuousMove(req)
+                    time.sleep(burst_duration)
+                    self.stop()
+                    time.sleep(pause_duration)
+                    elapsed += cycle_time
+                print(f"[PTZ/ONVIF] {self.name}: movement complete")
+            else:
+                print(f"[PTZ/ONVIF] {self.name}: continuous movement x={x} y={y} for {total_time:.1f}s")
                 self.ptz.ContinuousMove(req)
-                time.sleep(burst_duration)
-                
-                # Остановка
+                time.sleep(total_time)
                 self.stop()
-                time.sleep(pause_duration)
-                
-                elapsed += cycle_time
-                burst_count += 1
-                
-                print(f"[PTZ/ONVIF] {self.name}: burst #{burst_count} complete, elapsed: {elapsed:.1f}/{total_time}s")
-            
-            print(f"[PTZ/ONVIF] {self.name}: movement complete after {burst_count} bursts")
-            
+                print(f"[PTZ/ONVIF] {self.name}: movement complete")
         except Exception as e:
             print(f"[PTZ/ONVIF] {self.name}: continuous move error {e}")
 
@@ -303,6 +300,14 @@ def load_ptz_config() -> Dict[str, Any]:
         return {}
 
 
+def _merge_ptz_opts_into_onvif(cam_cfg: Dict[str, Any], onvif_cfg: Dict[str, Any]) -> None:
+    """Пробрасывает step_seconds и move_style из конфига камеры в onvif для универсальной работы."""
+    if "step_seconds" not in onvif_cfg:
+        onvif_cfg["step_seconds"] = float(cam_cfg.get("step_seconds", 8.0))
+    if "move_style" not in onvif_cfg:
+        onvif_cfg["move_style"] = str(cam_cfg.get("move_style", "continuous")).lower() or "continuous"
+
+
 def get_ptz_controller(camera_name: str) -> Optional[Any]:
     """Создаёт PTZ-контроллер для камеры (для джойстика), или None если камера без PTZ."""
     cfg = load_ptz_config()
@@ -313,6 +318,7 @@ def get_ptz_controller(camera_name: str) -> Optional[Any]:
     if cam_cfg.get("onvif"):
         onvif_cfg = dict(cam_cfg["onvif"])
         onvif_cfg["timeout"] = float(cam_cfg.get("timeout", 1.0))
+        _merge_ptz_opts_into_onvif(cam_cfg, onvif_cfg)
         try:
             return OnvifPTZController(camera_name, onvif_cfg)
         except Exception:
@@ -332,9 +338,9 @@ def start_ptz_sweeper_if_configured(camera_name: str) -> Optional[PTZSweeper]:
 
     controller: Any
     if cam_cfg.get("onvif"):
-        onvif_cfg = cam_cfg["onvif"]
-        # Передаём основной timeout в ONVIF конфиг
+        onvif_cfg = dict(cam_cfg["onvif"])
         onvif_cfg["timeout"] = float(cam_cfg.get("timeout", 1.0))
+        _merge_ptz_opts_into_onvif(cam_cfg, onvif_cfg)
         try:
             controller = OnvifPTZController(camera_name, onvif_cfg)
         except Exception as e:

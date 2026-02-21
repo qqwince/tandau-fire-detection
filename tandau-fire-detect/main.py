@@ -3,6 +3,17 @@ import os
 # Подавление логов HEVC/FFmpeg ("Could not find ref with POC") — до импорта cv2
 os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")
 
+# Совместимость со старыми чекпоинтами, сохранёнными с E2ELoss (ultralytics менял API)
+import ultralytics.utils.loss as _uloss
+if not hasattr(_uloss, "E2ELoss"):
+    try:
+        from ultralytics.utils.loss import v8DetectionLoss
+        _uloss.E2ELoss = v8DetectionLoss
+    except ImportError:
+        class _E2ELossStub:
+            pass
+        _uloss.E2ELoss = _E2ELossStub
+
 import cv2
 import shutil
 import subprocess
@@ -22,11 +33,10 @@ os.environ.setdefault(
 
 # Настройки оптимизации
 CONFIG = {
-    'skip_frames': False,  # Включить/выключить пропуск кадров (True = обрабатывать только последний кадр)
-    'reduce_quality': True,  # Включить/выключить понижение качества
-    'quality_scale': 1,  # Масштаб качест`ва (0.5 = 50% от оригинала)
-    'process_every_n_frames': 15,  # Обрабатывать каждый N-й кадр (для skip_frames=True)
+    'reduce_quality': True,  # Понижение разрешения кадра перед YOLO для ускорения
+    'quality_scale': 0.5,   # Масштаб (0.5 = 50% от оригинала — быстрее инференс)
     'detection_confidence': 0.6,  # Порог уверенности для детекции
+    'inference_size': 416,   # Размер стороны для YOLO (меньше = быстрее, 320–640)
 }
 
 # Модель YOLO — загружается только при распознавании (не в режиме --view-only)
@@ -36,15 +46,13 @@ def _load_model():
     global model
     if model is not None:
         return model
-    _custom_weights = "1702_1420.pt"
-    try:
-        model = YOLO(_custom_weights)
-    except AttributeError as e:
-        if "E2ELoss" in str(e) or "find_class" in str(e):
-            print("Warning: custom weights incompatible with this ultralytics version. Using yolov8n.pt.")
-            model = YOLO("yolov8n.pt")
-        else:
-            raise
+    _custom_weights = "2102_2033.pt"
+    if not os.path.isfile(_custom_weights):
+        raise FileNotFoundError(
+            f"Файл весов не найден: {_custom_weights}. "
+            "Положите чекпоинт модели детекции огня в каталог со скриптом."
+        )
+    model = YOLO(_custom_weights)
     return model
 save_path = "fire_detections/"
 os.makedirs(save_path, exist_ok=True)
@@ -361,46 +369,6 @@ def _normalize_rtsp_url(src):
     return f"{url}{sep}rtsp_transport=tcp"
 
 
-def _is_frame_corrupted(frame, gray_std_threshold=18, block_size=32):
-    """
-    Кадр считаем битым: серый (низкий std), зелёный/пурпурный оттенок (сбой H.264),
-    или сильная блочность (макроблочные артефакты).
-    """
-    try:
-        mean, std = cv2.meanStdDev(frame)
-        frame_std = float(std.mean())
-        if frame_std < gray_std_threshold:
-            return True, "gray"
-        # Зелёный или пурпурный оттенок — типичный сбой декодера H.264
-        b, g, r = (float(x) for x in mean.ravel()[:3])
-        if g > 1.4 * r and g > 1.4 * b:
-            return True, "green"
-        if (r > 1.5 * g and b > 1.5 * g) or (r < 0.5 * g and b < 0.5 * g):
-            return True, "tint"
-        # Блочность: разбиваем на блоки, считаем дисперсию по блокам; если разброс огромный — артефакты
-        h, w = frame.shape[:2]
-        if h < block_size * 2 or w < block_size * 2:
-            return False, ""
-        block_stds = []
-        for y in range(0, h - block_size, block_size):
-            for x in range(0, w - block_size, block_size):
-                bl = frame[y:y + block_size, x:x + block_size]
-                _, s = cv2.meanStdDev(bl)
-                block_stds.append(float(s.mean()))
-        if len(block_stds) < 4:
-            return False, ""
-        block_stds_arr = np.array(block_stds)
-        # Много блоков с аномально высокой или нулевой вариацией — макроблоки
-        median_std = np.median(block_stds_arr)
-        very_high = np.sum(block_stds_arr > median_std * 3) if median_std > 0.1 else 0
-        very_low = np.sum(block_stds_arr < 5)
-        if very_high > len(block_stds) * 0.2 or very_low > len(block_stds) * 0.2:
-            return True, "blocky"
-        return False, ""
-    except Exception:
-        return True, "error"
-
-
 def detect_fire_from_camera(camera_index, location_name, view_only=False):
     global stop_all
     def open_capture(src):
@@ -436,7 +404,7 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
             cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 7000)
         except Exception:
             pass
-        # Минимальный буфер — меньше задержки и меньше «залипания» на битых кадрах
+        # Минимальный буфер — меньше задержки
         try:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
@@ -468,9 +436,8 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
     PTZ_DELAY_SEC = 12
 
     if not view_only:
-        print(f"   • Пропуск кадров: {'Да' if CONFIG['skip_frames'] else 'Нет'}")
-        print(f"   • Понижение качества: {int(CONFIG['quality_scale'] * 100)}%" if CONFIG[
-            'reduce_quality'] else "   • Понижение качества: Нет")
+        print(f"   • Понижение качества: {int(CONFIG['quality_scale'] * 100)}%" if CONFIG['reduce_quality'] else "   • Понижение качества: Нет")
+        print(f"   • Размер инференса YOLO: {CONFIG['inference_size']}px")
 
     frame_count = 0
     processed_count = 0
@@ -484,12 +451,8 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
     last_detection_boxes = None  # Последний кадр с детекцией
     frames_to_show_boxes = 15  # Количество кадров для показа боксов после детекции
 
-    last_good_frame = None  # Последний нормальный кадр (подмена при серых/битых кадрах от камеры)
-    bad_frame_count = 0
-    none_count = 0  # для потокового чтения: подряд None = потеря потока
-    MAX_BAD_FRAMES_BEFORE_RECONNECT = 12  # переподключение после стольких подряд плохих кадров
-    FLUSH_FRAMES_ON_BAD = 25  # при первом битом кадре выбросить N кадров (для non-threaded)
-    MAX_NONE_BEFORE_RECONNECT = 15  # для threaded: столько подряд None → переподключение
+    none_count = 0
+    MAX_NONE_BEFORE_RECONNECT = 15  # подряд None → переподключение
 
     def _read_frame():
         if stream is not None:
@@ -498,7 +461,7 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
         return cap.read()
 
     def _reconnect():
-        nonlocal cap, stream, bad_frame_count, last_good_frame, none_count
+        nonlocal cap, stream, none_count
         s = stream
         if s is not None:
             s.release()
@@ -511,45 +474,43 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         if use_threaded:
             stream = RTSPStream(cap)
-        bad_frame_count = 0
         none_count = 0
-        last_good_frame = None
         return True
 
     winname = f"View - {location_name}" if view_only else f"Fire Detection - {location_name}"
     cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
 
-    # Для потокового RTSP — ожидание первого кадра (до 5 сек)
-    if stream is not None:
+    def _wait_first_frame():
+        """Ожидание первого кадра (до 5 сек). Возвращает False если пользователь нажал ESC."""
+        if stream is None:
+            return True
         for _ in range(250):
             if stream.get_frame() is not None:
-                break
-            # Показываем заглушку, пока ждём поток
+                return True
             placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
             placeholder[:] = (40, 40, 40)
             cv2.putText(placeholder, "Waiting for stream...", (180, 250), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
             cv2.imshow(winname, placeholder)
             if cv2.waitKey(1) & 0xFF == 27:
-                stop_all = True
-                break
+                return False
             time.sleep(0.02)
-        else:
-            print(f"⚠️ {location_name}: нет первого кадра за 5 сек, продолжаем...")
+        print(f"⚠️ {location_name}: нет первого кадра за 5 сек, продолжаем...")
+        return True
 
-    while (stream.is_opened() if stream else cap.isOpened()) and not stop_all:
-        ret, frame = _read_frame()
-        if not ret or frame is None:
-            none_count += 1
-            if none_count >= MAX_NONE_BEFORE_RECONNECT or (stream is None and none_count >= 3):
-                print(f"⚠️ Потеря потока с {location_name}, переподключение...")
-                if not _reconnect():
-                    print(f"❌ Не удалось переподключиться к {location_name}")
-                    break
-                continue
-            if last_good_frame is not None:
-                frame = last_good_frame.copy()
-            else:
-                # Нет кадра — показываем заглушку, чтобы окно не исчезало
+    if not _wait_first_frame():
+        stop_all = True
+
+    while not stop_all:
+        while (stream.is_opened() if stream else cap.isOpened()) and not stop_all:
+            ret, frame = _read_frame()
+            if not ret or frame is None:
+                none_count += 1
+                if none_count >= MAX_NONE_BEFORE_RECONNECT or (stream is None and none_count >= 3):
+                    print(f"⚠️ Потеря потока с {location_name}, переподключение...")
+                    if not _reconnect():
+                        print(f"❌ Не удалось переподключиться к {location_name}")
+                        break
+                    continue
                 placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
                 placeholder[:] = (40, 40, 40)
                 cv2.putText(placeholder, "Waiting for stream...", (180, 250), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
@@ -559,171 +520,117 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
                     break
                 time.sleep(0.02)
                 continue
-        else:
             none_count = 0
 
-        # Запуск PTZ после задержки (поток уже стабилен)
-        if ptz_sweeper is None and (time.time() - ptz_start_time) >= PTZ_DELAY_SEC:
-            ptz_sweeper = start_ptz_sweeper_if_configured(location_name)
-            if ptz_sweeper:
-                with _ptz_sweepers_lock:
-                    _ptz_sweepers[location_name] = ptz_sweeper
+            # Запуск PTZ после задержки (поток уже стабилен)
+            if ptz_sweeper is None and (time.time() - ptz_start_time) >= PTZ_DELAY_SEC:
+                ptz_sweeper = start_ptz_sweeper_if_configured(location_name)
+                if ptz_sweeper:
+                    with _ptz_sweepers_lock:
+                        _ptz_sweepers[location_name] = ptz_sweeper
 
-        # Проверка на битый кадр: серый, зелёный/пурпурный оттенок, макроблочные артефакты
-        is_bad, reason = _is_frame_corrupted(frame)
-        if is_bad:
-            bad_frame_count += 1
-            # При первом битом кадре — сброс буфера (только для non-threaded; для threaded кадры уже свежие)
-            if bad_frame_count == 1 and last_good_frame is not None and stream is None:
-                for _ in range(FLUSH_FRAMES_ON_BAD):
-                    cap.read()
-                ret2, frame2 = cap.read()
-                if ret2 and frame2 is not None:
-                    is_bad2, _ = _is_frame_corrupted(frame2)
-                    if not is_bad2:
-                        frame = frame2
-                        last_good_frame = frame.copy()
-                        bad_frame_count = 0
-            if bad_frame_count > 0:
-                if last_good_frame is not None:
-                    frame = last_good_frame.copy()
-                # иначе показываем кадр как есть (лучше артефакты, чем черный экран)
-                if bad_frame_count >= MAX_BAD_FRAMES_BEFORE_RECONNECT:
-                    print(f"⚠️ Серия битых кадров ({reason}) с {location_name}, переподключение...")
-                    if not _reconnect():
-                        print(f"❌ Не удалось переподключиться к {location_name}")
-                        break
-                    continue
-        else:
-            bad_frame_count = 0
-            last_good_frame = frame.copy()
+            frame_count += 1
 
-        frame_count += 1
-
-        if view_only:
-            display_frame = frame.copy()
-        # Пропуск кадров если включена опция (только при распознавании)
-        elif CONFIG['skip_frames']:
-            # Обрабатываем каждый N-й кадр
-            if frame_count % CONFIG['process_every_n_frames'] != 0:
-                # Просто показываем кадр без обработки
+            if view_only:
                 display_frame = frame.copy()
+            else:
+                # Понижение разрешения для ускорения инференса
+                if CONFIG['reduce_quality'] and CONFIG['quality_scale'] < 1.0:
+                    h, w = frame.shape[:2]
+                    nw = int(w * CONFIG['quality_scale'])
+                    nh = int(h * CONFIG['quality_scale'])
+                    process_frame = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
+                else:
+                    process_frame = frame
 
-                # Добавляем информацию
-                info_color = (0, 0, 255) if (last_detection_frame > 0 and (
-                            frame_count - last_detection_frame) < frames_to_show_detection) else (0, 255, 0)
+                # YOLO: фиксированный imgsz ускоряет инференс; verbose=0 — без логов
+                results = _load_model()(
+                    process_frame,
+                    imgsz=CONFIG['inference_size'],
+                    verbose=False,
+                    half=False,  # True если GPU с FP16 — быстрее на видеокарте
+                )
+                processed_count += 1
+
+                # Проверка на обнаружение огня
+                fire_detected = False
+                max_conf = 0
+
+                for result in results:
+                    if result.boxes is not None:
+                        for box in result.boxes:
+                            class_id = int(box.cls[0])
+                            conf = float(box.conf[0])
+                            if conf > CONFIG['detection_confidence'] and class_id == 0:
+                                fire_detected = True
+                                max_conf = max(max_conf, conf)
+
+                # Отрисовка результатов на оригинальном кадре
+                if fire_detected:
+                    last_detection_frame = frame_count
+                    img_with_boxes = results[0].plot()
+                    if CONFIG['reduce_quality'] and CONFIG['quality_scale'] < 1.0:
+                        img_with_boxes = cv2.resize(img_with_boxes, (frame.shape[1], frame.shape[0]))
+                    display_frame = img_with_boxes
+                    last_detection_boxes = display_frame.copy()
+                    detection_count += 1
+                    filename = f"{save_path}{location_name.replace(' ', '_')}_fire_{detection_count}.jpg"
+                    cv2.imwrite(filename, display_frame)
+                    print(f"🔥 Огонь! [{location_name}] Кадр {frame_count} сохранен: {filename} (уверенность: {max_conf:.2f})")
+                    try:
+                        send_to_site(filename, location_name, max_conf)
+                    except Exception as e:
+                        print(f"⚠️ Ошибка отправки на сайт: {e}")
+                    try:
+                        send_telegram_photo(filename)
+                    except Exception as e:
+                        print(f"⚠️ Ошибка отправки в Telegram: {e}")
+                else:
+                    display_frame = frame
+
+            # Расчет FPS
+            current_time = time.time()
+            if current_time - last_time >= 1.0:
+                fps = frame_count / (current_time - last_time)
+                last_time = current_time
+                frame_count = 0
+
+            # Определяем цвет информации и добавляем оверлей
+            if view_only:
+                cv2.putText(display_frame, f"FPS: {fps:.1f} | [VIEW ONLY - no detection]",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            else:
+                if fire_detected or (
+                        last_detection_frame > 0 and (frame_count - last_detection_frame) < frames_to_show_detection):
+                    info_color = (0, 0, 255)
+                else:
+                    info_color = (0, 255, 0)
                 cv2.putText(display_frame,
                             f"FPS: {fps:.1f} | Frame: {frame_count} | Processed: {processed_count} | Detections: {detection_count}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, info_color, 2)
-                cv2.putText(display_frame, f"[SKIP MODE: Processing every {CONFIG['process_every_n_frames']} frames]",
-                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-                # Если есть сохраненные боксы и прошло недостаточно времени - показываем их
-                if last_detection_boxes is not None and last_detection_frame > 0 and (
-                        frame_count - last_detection_frame) < frames_to_show_boxes:
-                    # Накладываем последние детекции на текущий кадр
-                    display_frame = last_detection_boxes.copy()
-                    # Добавляем информацию поверх
-                    cv2.putText(display_frame,
-                                f"FPS: {fps:.1f} | Frame: {frame_count} | Processed: {processed_count} | Detections: {detection_count}",
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, info_color, 2)
-                    cv2.putText(display_frame, f"[SKIP MODE: Processing every {CONFIG['process_every_n_frames']} frames]",
-                                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                    cv2.putText(display_frame, f"[SHOWING LAST DETECTION]",
-                                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            if not view_only and CONFIG['reduce_quality']:
+                cv2.putText(display_frame, f"[Quality: {int(CONFIG['quality_scale'] * 100)}%]",
+                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-                cv2.imshow(winname, display_frame)
+            # Показ кадра
+            cv2.imshow(winname, display_frame)
 
-                if cv2.waitKey(1) & 0xFF == 27:
-                    stop_all = True
-                    break
-                continue
+            # Проверка на нажатие ESC
+            if cv2.waitKey(1) & 0xFF == 27:
+                stop_all = True
+                break
 
-        else:
-            # Понижение качества для обработки если включено
-            process_frame = frame.copy()
-            if CONFIG['reduce_quality'] and CONFIG['quality_scale'] < 1.0:
-                height, width = process_frame.shape[:2]
-                new_width = int(width * CONFIG['quality_scale'])
-                new_height = int(height * CONFIG['quality_scale'])
-                process_frame = cv2.resize(process_frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
-
-            # Обработка кадра моделью
-            results = _load_model()(process_frame)
-            processed_count += 1
-
-            # Проверка на обнаружение огня
-            fire_detected = False
-            max_conf = 0
-
-            for result in results:
-                if result.boxes is not None:
-                    for box in result.boxes:
-                        class_id = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        if conf > CONFIG['detection_confidence'] and class_id == 0:
-                            fire_detected = True
-                            max_conf = max(max_conf, conf)
-
-            # Отрисовка результатов на оригинальном кадре
-            if fire_detected:
-                last_detection_frame = frame_count
-                img_with_boxes = results[0].plot()
-                if CONFIG['reduce_quality'] and CONFIG['quality_scale'] < 1.0:
-                    img_with_boxes = cv2.resize(img_with_boxes, (frame.shape[1], frame.shape[0]))
-                display_frame = img_with_boxes
-                last_detection_boxes = display_frame.copy()
-                detection_count += 1
-                filename = f"{save_path}{location_name.replace(' ', '_')}_fire_{detection_count}.jpg"
-                cv2.imwrite(filename, display_frame)
-                print(f"🔥 Огонь! [{location_name}] Кадр {frame_count} сохранен: {filename} (уверенность: {max_conf:.2f})")
-                try:
-                    send_to_site(filename, location_name, max_conf)
-                except Exception as e:
-                    print(f"⚠️ Ошибка отправки на сайт: {e}")
-                try:
-                    send_telegram_photo(filename)
-                except Exception as e:
-                    print(f"⚠️ Ошибка отправки в Telegram: {e}")
-            else:
-                display_frame = frame
-
-        # Расчет FPS
-        current_time = time.time()
-        if current_time - last_time >= 1.0:
-            fps = frame_count / (current_time - last_time)
-            last_time = current_time
-            frame_count = 0
-
-        # Определяем цвет информации и добавляем оверлей
-        if view_only:
-            cv2.putText(display_frame, f"FPS: {fps:.1f} | [VIEW ONLY - no detection]",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        else:
-            if fire_detected or (
-                    last_detection_frame > 0 and (frame_count - last_detection_frame) < frames_to_show_detection):
-                info_color = (0, 0, 255)
-            else:
-                info_color = (0, 255, 0)
-            cv2.putText(display_frame,
-                        f"FPS: {fps:.1f} | Frame: {frame_count} | Processed: {processed_count} | Detections: {detection_count}",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, info_color, 2)
-
-        if not view_only and CONFIG['skip_frames']:
-            cv2.putText(display_frame, f"[SKIP MODE: Every {CONFIG['process_every_n_frames']} frames]",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
-        if not view_only and CONFIG['reduce_quality']:
-            cv2.putText(display_frame, f"[Quality: {int(CONFIG['quality_scale'] * 100)}%]",
-                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
-        # Показ кадра
-        cv2.imshow(winname, display_frame)
-
-        # Проверка на нажатие ESC
-        if cv2.waitKey(1) & 0xFF == 27:
-            stop_all = True
+        # Поток закрылся без ESC — пробуем переподключиться
+        if stop_all:
             break
+        print(f"⚠️ {location_name}: камера отключилась (поток закрыт). Переподключение через 3 сек...")
+        time.sleep(3)
+        if not _reconnect():
+            print(f"❌ Не удалось переподключиться к {location_name}")
+            break
+        if not _wait_first_frame():
+            stop_all = True
 
     if stream is not None:
         stream.release()
@@ -744,17 +651,46 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
         print(f"📊 {location_name} - Обработано кадров: {processed_count}, Обнаружений: {detection_count}")
 
 
+def _mask_rtsp_url(url: str) -> str:
+    """Скрывает пароль в RTSP URL для вывода в консоль."""
+    if not isinstance(url, str) or "://" not in url:
+        return str(url)
+    try:
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(url)
+        if p.password:
+            netloc = f"{p.username or ''}:****@{p.hostname or ''}" + (f":{p.port}" if p.port else "")
+        else:
+            netloc = p.netloc
+        return urlunparse((p.scheme, netloc, p.path or "", p.params, p.query, p.fragment))
+    except Exception:
+        return url
+
+
+def print_cameras_disclaimer(cameras: list) -> None:
+    """Вывод подтверждающего дисклеймера: какие каналы выбраны."""
+    print("\n" + "=" * 60)
+    print("📷 ВЫБРАННЫЕ КАНАЛЫ (подтвердите перед запуском):")
+    print("=" * 60)
+    for i, (src, name) in enumerate(cameras, 1):
+        display_src = _mask_rtsp_url(src) if isinstance(src, str) else str(src)
+        print(f"  {i}. {name}")
+        print(f"     Источник: {display_src}")
+    print("=" * 60)
+    print("  Запуск через 3 сек. (остановите скрипт, если канал не тот.)")
+    print("=" * 60 + "\n")
+    time.sleep(3)
+
+
 def print_config():
     """Вывод текущей конфигурации"""
     print("\n" + "=" * 50)
     print("📋 КОНФИГУРАЦИЯ ОБРАБОТКИ:")
     print("=" * 50)
-    print(f"• Пропуск кадров: {'✅ Включен' if CONFIG['skip_frames'] else '❌ Выключен'}")
-    if CONFIG['skip_frames']:
-        print(f"  └─ Обработка каждого {CONFIG['process_every_n_frames']}-го кадра")
     print(f"• Понижение качества: {'✅ Включено' if CONFIG['reduce_quality'] else '❌ Выключено'}")
     if CONFIG['reduce_quality']:
         print(f"  └─ Масштаб: {int(CONFIG['quality_scale'] * 100)}%")
+    print(f"• Размер инференса YOLO: {CONFIG['inference_size']}px")
     print(f"• Порог детекции: {CONFIG['detection_confidence']}")
     print("=" * 50)
     print("ℹ️  Нажмите ESC в окне для остановки")
@@ -773,13 +709,15 @@ if __name__ == "__main__":
         ensure_configuration_interactive()
         print_config()
 
-    # Список камер
+    # Список камер (источник, отображаемое имя)
     cameras = [
         #(0, "Камера №1"),
         #(1, "Камера №2"),
         #("./fire1.mp4", "Камера №3"),
-        ("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/1", "FireCam1"),
+        ("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/2", "FireCam1"),
     ]
+
+    print_cameras_disclaimer(cameras)
 
     cams_cfg = load_ptz_config().get("cameras") or {}
     has_ptz = any(cams_cfg.get(n, {}).get("onvif") or cams_cfg.get(n, {}).get("left_url") for n in cams_cfg)
