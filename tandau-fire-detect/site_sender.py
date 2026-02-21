@@ -184,8 +184,7 @@ def ensure_configuration_interactive() -> None:
 
 def send_to_site(image_path, location, conf):
     now = datetime.now(timezone.utc).isoformat()
-<<<<<<< HEAD
-    
+
     # Пытаемся получить реальные координаты компьютера
     lat, lon = get_computer_coordinates()
     
@@ -199,9 +198,6 @@ def send_to_site(image_path, location, conf):
     if lat is None or lon is None:
         print(f"⚠️ Не удалось определить координаты для {location}, данные не отправлены.")
         return
-=======
-    lat, lon = CAMERA_COORDINATES.get(location, (None, None))
->>>>>>> 2cd8816fa75fb43fb4b68a15c4614b93ef5f753d
 
     data = {
         "location": location,

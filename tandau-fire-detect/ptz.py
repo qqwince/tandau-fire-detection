@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse, urlunparse
 
 import requests
 
@@ -42,7 +43,7 @@ class PTZController:
                 "auth": auth,
                 "allow_redirects": True,
             }
-            if url.startswith("https://") and self.insecure_tls:
+            if url.startswith("http://") and self.insecure_tls:
                 kwargs["verify"] = False
             resp = requests.get(url, **kwargs)
             try:
@@ -87,7 +88,12 @@ class OnvifPTZController:
         self.max_down = float(cfg.get("max_down", -1.0))  # Максимальная позиция вниз
         self.timeout = float(cfg.get("timeout", 1.0))  # Используем timeout из основного конфига
 
-        self.cam = ONVIFCamera(host, port, username, password)
+        wsdl_dir = _get_wsdl_dir()
+        if wsdl_dir:
+            self.cam = ONVIFCamera(host, port, username, password, wsdl_dir=wsdl_dir)
+        else:
+            self.cam = ONVIFCamera(host, port, username, password)
+        _fix_xaddrs_use_config_host(self.cam, host, port)
         self.media = self.cam.create_media_service()
         self.ptz = self.cam.create_ptz_service()
         profiles = self.media.GetProfiles()
@@ -155,11 +161,35 @@ class OnvifPTZController:
         except Exception as e:
             print(f"[PTZ/ONVIF] {self.name}: absolute move error {e}")
 
+    def _start_continuous_move(self, x: float, y: float) -> None:
+        """Запуск непрерывного движения без ожидания (для джойстика: движение пока не вызван stop)."""
+        try:
+            req = self.ptz.create_type('ContinuousMove')
+            req.ProfileToken = self.profile.token
+            req.Velocity = {'PanTilt': {'x': x, 'y': y}}
+            self.ptz.ContinuousMove(req)
+            print(f"[PTZ/ONVIF] {self.name}: move pan={x:.2f} tilt={y:.2f}")
+        except Exception as e:
+            print(f"[PTZ/ONVIF] {self.name}: continuous move error {e}")
+
+    def move(self, pan: float, tilt: float) -> None:
+        """Задать направление движения (значения -1..1). Используем pan_speed/tilt_speed из конфига."""
+        pan = max(-1.0, min(1.0, pan)) * self.pan_speed
+        tilt_val = self.tilt_speed if self.tilt_speed else self.pan_speed
+        tilt = max(-1.0, min(1.0, tilt)) * tilt_val
+        self._start_continuous_move(pan, tilt)
+
     def left(self) -> None:
         self._continuous_move(-1.0, 0.0)  # Максимальная скорость влево
 
     def right(self) -> None:
         self._continuous_move(1.0, 0.0)  # Максимальная скорость вправо
+
+    def up(self) -> None:
+        self._start_continuous_move(0.0, self.tilt_speed if self.tilt_speed else 1.0)
+
+    def down(self) -> None:
+        self._start_continuous_move(0.0, -(self.tilt_speed if self.tilt_speed else 1.0))
 
     def stop(self) -> None:
         try:
@@ -180,6 +210,21 @@ class PTZSweeper(threading.Thread):
         self.pause_seconds = pause_seconds
         self.cycles = cycles  # 0 = бесконечно
         self._stop_event = threading.Event()
+        self._pause_until = 0.0  # time.time() до которого приостановлен (джойстик)
+        self._pause_lock = threading.Lock()
+
+    def pause(self, seconds: float = 5.0) -> None:
+        """Приостановить патруль на seconds секунд (используется при управлении джойстиком)."""
+        with self._pause_lock:
+            self._pause_until = max(self._pause_until, time.time()) + seconds
+
+    def _wait_pause(self) -> None:
+        with self._pause_lock:
+            until = self._pause_until
+        while time.time() < until and not self._stop_event.is_set():
+            time.sleep(0.1)
+            with self._pause_lock:
+                until = self._pause_until
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -191,12 +236,18 @@ class PTZSweeper(threading.Thread):
     def run(self) -> None:
         iteration = 0
         while not self._stop_event.is_set() and (self.cycles == 0 or iteration < self.cycles):
+            self._wait_pause()
+            if self._stop_event.is_set():
+                break
             # Влево
             self.controller.left()
             self._sleep_with_check(self.step_seconds)
             self.controller.stop()
             self._sleep_with_check(self.pause_seconds)
 
+            if self._stop_event.is_set():
+                break
+            self._wait_pause()
             if self._stop_event.is_set():
                 break
 
@@ -214,6 +265,32 @@ class PTZSweeper(threading.Thread):
             time.sleep(0.1)
 
 
+def _fix_xaddrs_use_config_host(cam: Any, host: str, port: int) -> None:
+    """Подменяет host:port в xaddrs на значения из конфига. Камера часто возвращает свой внутренний IP (192.168.x.x)."""
+    netloc = f"{host}:{port}"
+    for ns, xaddr in list(getattr(cam, "xaddrs", {}).items()):
+        try:
+            p = urlparse(xaddr)
+            new_xaddr = urlunparse((p.scheme, netloc, p.path or "/", p.params, p.query, p.fragment))
+            cam.xaddrs[ns] = new_xaddr
+        except Exception:
+            pass
+
+
+def _get_wsdl_dir() -> Optional[str]:
+    """Путь к папке wsdl (обход ошибки 'onvif.xsd not found' при установке из PyPI)."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base, "wsdl"),
+        os.path.join(base, "..", "wsdl"),
+    ]
+    for d in candidates:
+        path = os.path.normpath(d)
+        if os.path.isfile(os.path.join(path, "onvif.xsd")):
+            return path
+    return None
+
+
 def load_ptz_config() -> Dict[str, Any]:
     base_dir = os.path.dirname(__file__)
     cfg_path = os.path.join(base_dir, "ptz_config.json")
@@ -224,6 +301,25 @@ def load_ptz_config() -> Dict[str, Any]:
             return json.load(f)
     except Exception:
         return {}
+
+
+def get_ptz_controller(camera_name: str) -> Optional[Any]:
+    """Создаёт PTZ-контроллер для камеры (для джойстика), или None если камера без PTZ."""
+    cfg = load_ptz_config()
+    cameras = cfg.get("cameras", {}) if isinstance(cfg, dict) else {}
+    cam_cfg = cameras.get(camera_name)
+    if not cam_cfg:
+        return None
+    if cam_cfg.get("onvif"):
+        onvif_cfg = dict(cam_cfg["onvif"])
+        onvif_cfg["timeout"] = float(cam_cfg.get("timeout", 1.0))
+        try:
+            return OnvifPTZController(camera_name, onvif_cfg)
+        except Exception:
+            return None
+    if cam_cfg.get("left_url") or cam_cfg.get("right_url"):
+        return PTZController(camera_name, cam_cfg)
+    return None
 
 
 def start_ptz_sweeper_if_configured(camera_name: str) -> Optional[PTZSweeper]:

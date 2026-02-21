@@ -1,22 +1,22 @@
 {
   "cameras": {
-    "Камера IP": {
+    "FireCam1": {
       "timeout": 7,
       "step_seconds": 1,
       "pause_seconds": 2,
       "sweep_cycles": 0,
       "onvif": {
-        "host": "192.168.100.175",
-        "port": 554,
-        "username": "admin",
-        "password": "L238872B",
+        "host": "firecam.myddns.me",
+        "port": 31200,
+        "username": "onvif",
+        "password": "Qwert321",
         "pan_speed": 0.4,
-        "tilt_speed": 0.0,
-        "timeout": 1.0,
-        "max_left": -4.0,
-        "max_right": 4.0,
-        "max_up": 1.0,
-        "max_down": -1.0
+        "tilt_speed": 0,
+        "timeout": 1,
+        "max_left": -4,
+        "max_right": 4,
+        "max_up": 1,
+        "max_down": -1
       }
     }
   }

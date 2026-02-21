@@ -127,8 +127,9 @@ export function FireListPanel({
                                                 Координаты
                                             </p>
                                             <p className="font-mono font-medium">
-                                                {site.latitude.toFixed(4)},{' '}
-                                                {site.longitude.toFixed(4)}
+                                                {site.latitude != null && site.longitude != null
+                                                    ? `${Number(site.latitude).toFixed(4)}, ${Number(site.longitude).toFixed(4)}`
+                                                    : '—'}
                                             </p>
                                         </div>
                                     </div>
