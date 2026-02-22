@@ -9,7 +9,7 @@
       "protocol": "isapi",
       "isapi": {
         "host": "firecam.myddns.me",
-        "port": 80,
+        "port": 31200,
         "username": "operator",
         "password": "qwert321",
         "channel": 1,

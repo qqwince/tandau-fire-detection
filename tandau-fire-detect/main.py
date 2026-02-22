@@ -824,10 +824,10 @@ if __name__ == "__main__":
     cameras = [
         #(0, "Камера №1"),
         #(1, "Камера №2"),
-        ("./fire2.mp4", "Камера №1"),
-        ("./fire5.mp4", "Камера №2"),
+        #("./fire2.mp4", "Камера №1"),
+        #("./fire5.mp4", "Камера №2"),
         ("./fire1.mp4", "Камера №3"),
-        #("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/1", "FireCam1"),
+        ("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/2", "FireCam1"),
     ]
 
     # Подтверждение каналов только при RTSP (для локального видео/файла не спрашиваем)
