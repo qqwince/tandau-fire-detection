@@ -86,13 +86,6 @@ class HikvisionISAPIPTZController:
 
         self.base_url = f"{'https' if use_ssl else 'http'}://{host}:{port}"
         self.timeout = float(cfg.get("timeout", 5.0))
-        # #region agent log
-        try:
-            _log = {"id": "ptz_isapi_init", "timestamp": __import__("time").time() * 1000, "location": "ptz.py:HikvisionISAPIPTZController.__init__", "message": "ISAPI config", "data": {"host": host, "port": port, "base_url": f"{'https' if use_ssl else 'http'}://{host}:{port}", "timeout": self.timeout}, "hypothesisId": "H1"}
-            open("debug-003321.log", "a", encoding="utf-8").write(__import__("json").dumps(_log, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        # #endregion
         self.step_seconds = float(cfg.get("step_seconds", 8.0))
         self.move_style = str(cfg.get("move_style", "continuous")).lower() or "continuous"
         self.pan_speed = int(cfg.get("pan_speed", 80))  # 1..100 для ISAPI
@@ -133,13 +126,6 @@ class HikvisionISAPIPTZController:
                             print(f"[PTZ/ISAPI] {self.name}: WWW-Authenticate: {www_auth[:100]}")
             return False
         except Exception as e:
-            # #region agent log
-            try:
-                _log = {"id": "ptz_isapi_error", "timestamp": __import__("time").time() * 1000, "location": "ptz.py:_put_continuous", "message": "ISAPI request failed", "data": {"url": url, "timeout": self.timeout, "error": str(e)[:200]}, "hypothesisId": "H2"}
-                open("debug-003321.log", "a", encoding="utf-8").write(__import__("json").dumps(_log, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             print(f"[PTZ/ISAPI] {self.name}: ошибка {e}")
             return False
 

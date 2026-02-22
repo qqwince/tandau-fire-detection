@@ -623,7 +623,6 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False, window
             if view_only:
                 display_frame = frame.copy()
             else:
-                # Понижение разрешения для ускорения инференса
                 if CONFIG['reduce_quality'] and CONFIG['quality_scale'] < 1.0:
                     h, w = frame.shape[:2]
                     nw = int(w * CONFIG['quality_scale'])
@@ -632,19 +631,11 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False, window
                 else:
                     process_frame = frame
 
-                # YOLO: фиксированный imgsz ускоряет инференс; verbose=0 — без логов
-                results = _load_model()(
-                    process_frame,
-                    imgsz=CONFIG['inference_size'],
-                    verbose=False,
-                    half=False,  # True если GPU с FP16 — быстрее на видеокарте
-                )
+                results = _load_model()(process_frame, imgsz=CONFIG['inference_size'], verbose=False, half=False)
                 processed_count += 1
 
-                # Проверка на обнаружение огня
                 fire_detected = False
                 max_conf = 0
-
                 for result in results:
                     if result.boxes is not None:
                         for box in result.boxes:
@@ -654,7 +645,6 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False, window
                                 fire_detected = True
                                 max_conf = max(max_conf, conf)
 
-                # Отрисовка результатов на оригинальном кадре
                 if fire_detected:
                     last_detection_frame = frame_count
                     img_with_boxes = results[0].plot()
@@ -677,32 +667,21 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False, window
                 else:
                     display_frame = frame
 
-            # Расчет FPS
+            # Расчёт FPS
             current_time = time.time()
             if current_time - last_time >= 1.0:
                 fps = frame_count / (current_time - last_time)
                 last_time = current_time
                 frame_count = 0
 
-            # Определяем цвет информации и добавляем оверлей
+            # Оверлей и показ кадра
             if view_only:
                 cv2.putText(display_frame, f"Cam {window_index} | FPS: {fps:.1f} | [VIEW ONLY]",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             else:
-                if fire_detected or (
-                        last_detection_frame > 0 and (frame_count - last_detection_frame) < frames_to_show_detection):
-                    info_color = (0, 0, 255)
-                else:
-                    info_color = (0, 255, 0)
-                cv2.putText(display_frame,
-                            f"Cam {window_index} | FPS: {fps:.1f} | Frame: {frame_count} | Detections: {detection_count}",
+                info_color = (0, 0, 255) if fire_detected else (0, 255, 0)
+                cv2.putText(display_frame, f"Cam {window_index} | FPS: {fps:.1f} | Detections: {detection_count}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, info_color, 2)
-
-            if not view_only and CONFIG['reduce_quality']:
-                cv2.putText(display_frame, f"[Quality: {int(CONFIG['quality_scale'] * 100)}%]",
-                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
-            # Показ кадра
             cv2.imshow(winname, display_frame)
 
             # Проверка на нажатие ESC или S (остановить автопатруль)
@@ -826,8 +805,9 @@ if __name__ == "__main__":
         #(1, "Камера №2"),
         #("./fire2.mp4", "Камера №1"),
         #("./fire5.mp4", "Камера №2"),
-        ("./fire1.mp4", "Камера №3"),
+        #("./fire1.mp4", "Камера №3"),
         ("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/2", "FireCam1"),
+        ("rtsp://admin:L238872B@192.168.100.60:554/cam/realmonitor?channel=1&subtype=1", "FireCam2"),
     ]
 
     # Подтверждение каналов только при RTSP (для локального видео/файла не спрашиваем)
