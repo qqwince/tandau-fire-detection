@@ -4,7 +4,7 @@ interface SessionsPanelProps {
     sessions: Session[]
     activeSessionId: number | null
     onActiveSessionChange: (id: number | null) => void
-    onOpenManage: () => void
+    onOpenManage: (sessionId: number) => void
     newSessionName: string
     onNewSessionNameChange: (value: string) => void
     onCreateSession: () => void

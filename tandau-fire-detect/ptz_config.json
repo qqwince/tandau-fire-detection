@@ -5,19 +5,16 @@
       "step_seconds": 8,
       "pause_seconds": 2,
       "sweep_cycles": 0,
-      "move_style": "continuous",
-      "onvif": {
+      "move_style": "burst",
+      "protocol": "isapi",
+      "isapi": {
         "host": "firecam.myddns.me",
-        "port": 31200,
-        "username": "onvif",
-        "password": "Qwert321",
-        "pan_speed": 0.6,
-        "tilt_speed": 0,
-        "timeout": 1,
-        "max_left": -1,
-        "max_right": 1,
-        "max_up": 1,
-        "max_down": -1
+        "port": 80,
+        "username": "operator",
+        "password": "qwert321",
+        "channel": 1,
+        "use_ssl": false,
+        "pan_speed": 80
       }
     }
   }

@@ -255,8 +255,10 @@ def send_to_site(image_path, location, conf):
     except FatalConfigError:
         # Пробрасываем дальше, чтобы верхний уровень мог остановить работу
         raise
+    except requests.RequestException as e:
+        print(f"⚠️ Сайт недоступен. Запустите бэкенд (fire_site) на http://127.0.0.1:8000 или задайте FIRE_SITE_API_URL.")
     except Exception as e:
-        print(f"❌ Ошибка соединения: {e}")
+        print(f"❌ Ошибка отправки на сайт: {e}")
     finally:
         try:
             if file_obj:

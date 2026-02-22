@@ -25,6 +25,21 @@ from site_sender import send_to_site, ensure_configuration_interactive
 from ptz import start_ptz_sweeper_if_configured, get_ptz_controller, load_ptz_config
 from telegram_sender import send_telegram_photo
 
+
+def is_rtsp_source(src) -> bool:
+    """True, если источник — ссылка RTSP (тогда работаем как PTZ: джойстик, переподключения)."""
+    return isinstance(src, str) and src.strip().lower().startswith("rtsp://")
+
+
+def is_ptz_camera(location_name: str) -> bool:
+    """Есть ли у камеры с таким именем PTZ в ptz_config (для списка в джойстике)."""
+    cfg = load_ptz_config()
+    cams = cfg.get("cameras") or {}
+    cam = cams.get(location_name) if isinstance(cams, dict) else None
+    if not cam or not isinstance(cam, dict):
+        return False
+    return bool(cam.get("onvif") or cam.get("isapi") or cam.get("left_url"))
+
 # Опции FFMPEG для RTSP (fallback OpenCV): TCP, увеличенный буфер для стабильности
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
@@ -33,7 +48,7 @@ os.environ.setdefault(
 
 # Настройки оптимизации
 CONFIG = {
-    'reduce_quality': True,  # Понижение разрешения кадра перед YOLO для ускорения
+    'reduce_quality': False,  # Понижение разрешения кадра перед YOLO для ускорения
     'quality_scale': 0.5,   # Масштаб (0.5 = 50% от оригинала — быстрее инференс)
     'detection_confidence': 0.6,  # Порог уверенности для детекции
     'inference_size': 416,   # Размер стороны для YOLO (меньше = быстрее, 320–640)
@@ -62,10 +77,31 @@ stop_all = False
 # Реестр PTZ sweepers для паузы при управлении джойстиком
 _ptz_sweepers = {}
 _ptz_sweepers_lock = threading.Lock()
+# Камеры, для которых пользователь вручную остановил автопатруль (не перезапускать)
+_user_stopped_sweep = set()
 
 
-def _run_ptz_joystick_window():
-    """Отдельное окно джойстика с выбором камеры. Пауза патруля 5 сек при управлении."""
+def stop_sweeper_for_camera(camera_name: str) -> None:
+    """Останавливает автоматическое движение влево-вправо для указанной камеры."""
+    with _ptz_sweepers_lock:
+        _user_stopped_sweep.add(camera_name)
+        sw = _ptz_sweepers.pop(camera_name, None)
+    if sw:
+        sw.stop()
+        print(f"[PTZ] Автопатруль остановлен для камеры '{camera_name}'.")
+
+
+def resume_sweeper_for_camera(camera_name: str) -> None:
+    """Разрешает снова запустить автопатруль для камеры (цикл камеры подхватит на следующем кадре)."""
+    with _ptz_sweepers_lock:
+        _user_stopped_sweep.discard(camera_name)
+    print(f"[PTZ] Автопатруль будет снова запущен для камеры '{camera_name}'.")
+
+
+def _run_ptz_joystick_window(camera_names: set):
+    """Окно джойстика только для RTSP-камер из camera_names с PTZ в ptz_config. Не создаём окно, если нечего показывать."""
+    if not camera_names:
+        return
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -74,7 +110,10 @@ def _run_ptz_joystick_window():
         return
     cfg = load_ptz_config()
     cams = cfg.get("cameras") or {}
-    cameras = [n for n in cams if cams.get(n, {}).get("onvif") or cams.get(n, {}).get("left_url")]
+    cameras = [
+        n for n in cams
+        if n in camera_names and (cams.get(n, {}).get("onvif") or cams.get(n, {}).get("isapi") or cams.get(n, {}).get("left_url"))
+    ]
     if not cameras:
         return
     controllers = {}
@@ -216,6 +255,33 @@ def _run_ptz_joystick_window():
 
     hint = tk.Label(f, text="Перетащите ручку или кликните в нужном направлении", fg="#64748b", bg="#0f0f1a", font=("", 9))
     hint.pack(pady=(8, 0))
+
+    def on_stop_sweep():
+        name = var.get()
+        if name:
+            stop_sweeper_for_camera(name)
+            status = tk.Label(f, text="Автопатруль остановлен", fg="#22c55e", bg="#0f0f1a", font=("", 9))
+            status.pack(pady=(6, 0))
+            root.after(2000, status.destroy)
+
+    def on_resume_sweep():
+        name = var.get()
+        if name:
+            resume_sweeper_for_camera(name)
+            status = tk.Label(f, text="Автопатруль будет запущен", fg="#22c55e", bg="#0f0f1a", font=("", 9))
+            status.pack(pady=(6, 0))
+            root.after(2000, status.destroy)
+
+    btn_frame = tk.Frame(f, bg="#0f0f1a")
+    btn_frame.pack(pady=(12, 0))
+    btn_stop = tk.Button(btn_frame, text="Остановить автопатруль", command=on_stop_sweep,
+                         bg="#1e293b", fg="#f8fafc", activebackground="#334155", activeforeground="#f8fafc",
+                         relief=tk.FLAT, padx=12, pady=6, cursor="hand2", font=("", 10))
+    btn_stop.pack(side=tk.LEFT, padx=(0, 8))
+    btn_resume = tk.Button(btn_frame, text="Запустить автопатруль", command=on_resume_sweep,
+                           bg="#1e293b", fg="#f8fafc", activebackground="#334155", activeforeground="#f8fafc",
+                           relief=tk.FLAT, padx=12, pady=6, cursor="hand2", font=("", 10))
+    btn_resume.pack(side=tk.LEFT)
 
     root.protocol("WM_DELETE_WINDOW", lambda: (on_joy_release(), root.destroy()))
     root.mainloop()
@@ -369,7 +435,7 @@ def _normalize_rtsp_url(src):
     return f"{url}{sep}rtsp_transport=tcp"
 
 
-def detect_fire_from_camera(camera_index, location_name, view_only=False):
+def detect_fire_from_camera(camera_index, location_name, view_only=False, window_index=1):
     global stop_all
     def open_capture(src):
         if isinstance(src, str) and src.strip().lower().startswith("rtsp://"):
@@ -425,12 +491,12 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
     # Настройка буфера камеры для уменьшения задержки
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    # Потоковое чтение RTSP — буфер не переполняется при медленной обработке (YOLO)
-    use_threaded = True
+    # Потоковый читатель только для RTSP (для файла/веб-камеры читаем из cap напрямую — иначе ложная «потеря потока»)
+    use_threaded = is_rtsp_source(camera_index)
     stream = RTSPStream(cap) if use_threaded else None
 
     print(f"✅ {location_name} запущена")
-    # PTZ запускаем с задержкой, чтобы видеопоток успел стабилизироваться
+    is_ptz = is_rtsp_source(camera_index)  # RTSP — джойстик, повороты, переподключения; не RTSP — только показ
     ptz_sweeper = None
     ptz_start_time = time.time()
     PTZ_DELAY_SEC = 12
@@ -452,7 +518,8 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
     frames_to_show_boxes = 15  # Количество кадров для показа боксов после детекции
 
     none_count = 0
-    MAX_NONE_BEFORE_RECONNECT = 15  # подряд None → переподключение
+    MAX_NONE_BEFORE_RECONNECT = 15
+    window_size_set = False  # один раз подгоняем окно под разрешение кадра
 
     def _read_frame():
         if stream is not None:
@@ -477,7 +544,8 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
         none_count = 0
         return True
 
-    winname = f"View - {location_name}" if view_only else f"Fire Detection - {location_name}"
+    # Уникальный ASCII-заголовок: без кириллицы (кракозябры на Windows) и разное окно на каждый поток
+    winname = f"View {window_index}" if view_only else f"Fire Detection {window_index}"
     cv2.namedWindow(winname, cv2.WINDOW_NORMAL)
 
     def _wait_first_frame():
@@ -506,11 +574,15 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
             if not ret or frame is None:
                 none_count += 1
                 if none_count >= MAX_NONE_BEFORE_RECONNECT or (stream is None and none_count >= 3):
-                    print(f"⚠️ Потеря потока с {location_name}, переподключение...")
-                    if not _reconnect():
-                        print(f"❌ Не удалось переподключиться к {location_name}")
+                    if is_ptz:
+                        print(f"⚠️ Потеря потока с {location_name}, переподключение...")
+                        if not _reconnect():
+                            print(f"❌ Не удалось переподключиться к {location_name}")
+                            break
+                        continue
+                    else:
+                        print(f"⚠️ Потеря потока с {location_name}, выход.")
                         break
-                    continue
                 placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
                 placeholder[:] = (40, 40, 40)
                 cv2.putText(placeholder, "Waiting for stream...", (180, 250), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 200, 200), 2)
@@ -522,12 +594,29 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
                 continue
             none_count = 0
 
-            # Запуск PTZ после задержки (поток уже стабилен)
-            if ptz_sweeper is None and (time.time() - ptz_start_time) >= PTZ_DELAY_SEC:
-                ptz_sweeper = start_ptz_sweeper_if_configured(location_name)
-                if ptz_sweeper:
+            # Один раз выставляем размер окна по разрешению кадра (исходное разрешение)
+            if not window_size_set:
+                try:
+                    h, w = frame.shape[:2]
+                    cv2.resizeWindow(winname, w, h)
+                except Exception:
+                    pass
+                window_size_set = True
+
+            # PTZ только для камер, у которых в ptz_config реально настроен PTZ
+            if is_ptz:
+                if ptz_sweeper is not None and not ptz_sweeper.is_alive():
+                    ptz_sweeper = None
                     with _ptz_sweepers_lock:
-                        _ptz_sweepers[location_name] = ptz_sweeper
+                        _ptz_sweepers.pop(location_name, None)
+                if ptz_sweeper is None and (time.time() - ptz_start_time) >= PTZ_DELAY_SEC:
+                    with _ptz_sweepers_lock:
+                        skip_start = location_name in _user_stopped_sweep
+                    if not skip_start:
+                        ptz_sweeper = start_ptz_sweeper_if_configured(location_name)
+                        if ptz_sweeper:
+                            with _ptz_sweepers_lock:
+                                _ptz_sweepers[location_name] = ptz_sweeper
 
             frame_count += 1
 
@@ -597,7 +686,7 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
 
             # Определяем цвет информации и добавляем оверлей
             if view_only:
-                cv2.putText(display_frame, f"FPS: {fps:.1f} | [VIEW ONLY - no detection]",
+                cv2.putText(display_frame, f"Cam {window_index} | FPS: {fps:.1f} | [VIEW ONLY]",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             else:
                 if fire_detected or (
@@ -606,7 +695,7 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
                 else:
                     info_color = (0, 255, 0)
                 cv2.putText(display_frame,
-                            f"FPS: {fps:.1f} | Frame: {frame_count} | Processed: {processed_count} | Detections: {detection_count}",
+                            f"Cam {window_index} | FPS: {fps:.1f} | Frame: {frame_count} | Detections: {detection_count}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, info_color, 2)
 
             if not view_only and CONFIG['reduce_quality']:
@@ -616,15 +705,24 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
             # Показ кадра
             cv2.imshow(winname, display_frame)
 
-            # Проверка на нажатие ESC
-            if cv2.waitKey(1) & 0xFF == 27:
+            # Проверка на нажатие ESC или S (остановить автопатруль)
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27:
                 stop_all = True
                 break
+            if is_ptz:
+                if key == ord("s") or key == ord("S"):
+                    stop_sweeper_for_camera(location_name)
+                if key == ord("r") or key == ord("R"):
+                    resume_sweeper_for_camera(location_name)
 
-        # Поток закрылся без ESC — пробуем переподключиться
+        # Поток закрылся — переподключение только для RTSP
         if stop_all:
             break
-        print(f"⚠️ {location_name}: камера отключилась (поток закрыт). Переподключение через 3 сек...")
+        if not is_ptz:
+            print(f"⚠️ {location_name}: поток завершён.")
+            break
+        print(f"⚠️ {location_name}: поток закрыт, переподключение через 3 сек...")
         time.sleep(3)
         if not _reconnect():
             print(f"❌ Не удалось переподключиться к {location_name}")
@@ -636,14 +734,14 @@ def detect_fire_from_camera(camera_index, location_name, view_only=False):
         stream.release()
     else:
         cap.release()
-    # Останавливаем PTZ, если был запущен
-    try:
-        if ptz_sweeper is not None:
-            with _ptz_sweepers_lock:
-                _ptz_sweepers.pop(location_name, None)
-            ptz_sweeper.stop()
-    except Exception:
-        pass
+    if is_ptz:
+        try:
+            if ptz_sweeper is not None:
+                with _ptz_sweepers_lock:
+                    _ptz_sweepers.pop(location_name, None)
+                ptz_sweeper.stop()
+        except Exception:
+            pass
     cv2.destroyWindow(winname)
     if view_only:
         print(f"📊 {location_name} - просмотр завершён")
@@ -667,19 +765,31 @@ def _mask_rtsp_url(url: str) -> str:
         return url
 
 
-def print_cameras_disclaimer(cameras: list) -> None:
-    """Вывод подтверждающего дисклеймера: какие каналы выбраны."""
+def confirm_cameras(cameras: list, skip_confirm: bool = False) -> bool:
+    """
+    Выводит список каналов и спрашивает: «Уверены ли вы, что хотите использовать канал N? (y/n)».
+    Возвращает True для продолжения, False для выхода. При skip_confirm=True не спрашивает (--yes).
+    """
     print("\n" + "=" * 60)
-    print("📷 ВЫБРАННЫЕ КАНАЛЫ (подтвердите перед запуском):")
+    print("📷 ВЫБРАННЫЕ КАНАЛЫ:")
     print("=" * 60)
     for i, (src, name) in enumerate(cameras, 1):
         display_src = _mask_rtsp_url(src) if isinstance(src, str) else str(src)
-        print(f"  {i}. {name}")
+        print(f"  Канал {i}: {name}")
         print(f"     Источник: {display_src}")
     print("=" * 60)
-    print("  Запуск через 3 сек. (остановите скрипт, если канал не тот.)")
-    print("=" * 60 + "\n")
-    time.sleep(3)
+    if skip_confirm:
+        print("  Запуск без подтверждения (--yes).\n")
+        return True
+    try:
+        answer = input("Уверены ли вы, что хотите использовать эти каналы? (y/n): ").strip().lower()
+    except EOFError:
+        answer = "n"
+    if answer in ("y", "yes", "д", "да"):
+        print("  Запуск.\n")
+        return True
+    print("  Выход. Измените список камер в main.py и запустите снова.\n")
+    return False
 
 
 def print_config():
@@ -700,6 +810,7 @@ def print_config():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Система детекции огня с RTSP-камерами")
     parser.add_argument("--view-only", action="store_true", help="Только воспроизведение и управление PTZ, без распознавания")
+    parser.add_argument("--yes", "-y", action="store_true", help="Не спрашивать подтверждение каналов")
     args = parser.parse_args()
     view_only = args.view_only
 
@@ -709,26 +820,32 @@ if __name__ == "__main__":
         ensure_configuration_interactive()
         print_config()
 
-    # Список камер (источник, отображаемое имя)
+    # Список камер (источник, отображаемое имя). Видео: RTSP/файл/индекс. PTZ: в ptz_config.json (protocol: "onvif" | "isapi")
     cameras = [
         #(0, "Камера №1"),
         #(1, "Камера №2"),
-        #("./fire1.mp4", "Камера №3"),
-        ("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/2", "FireCam1"),
+        ("./fire2.mp4", "Камера №1"),
+        ("./fire5.mp4", "Камера №2"),
+        ("./fire1.mp4", "Камера №3"),
+        #("rtsp://operator:qwert321@firecam.myddns.me:554/Streaming/channels/1", "FireCam1"),
     ]
 
-    print_cameras_disclaimer(cameras)
+    # Подтверждение каналов только при RTSP (для локального видео/файла не спрашиваем)
+    if any(is_rtsp_source(src) for src, _ in cameras):
+        if not confirm_cameras(cameras, skip_confirm=args.yes):
+            raise SystemExit(0)
 
-    cams_cfg = load_ptz_config().get("cameras") or {}
-    has_ptz = any(cams_cfg.get(n, {}).get("onvif") or cams_cfg.get(n, {}).get("left_url") for n in cams_cfg)
-    if has_ptz:
-        threading.Thread(target=_run_ptz_joystick_window, daemon=True).start()
+    # Окно джойстика только если в списке есть RTSP и у такой камеры настроен PTZ в ptz_config
+    has_rtsp = any(is_rtsp_source(src) for src, _ in cameras)
+    ptz_camera_names = {name for (src, name) in cameras if is_rtsp_source(src) and is_ptz_camera(name)}
+    if has_rtsp and ptz_camera_names:
+        threading.Thread(target=_run_ptz_joystick_window, args=(ptz_camera_names,), daemon=True).start()
 
     threads = []
 
-    # Запуск потока для каждой камеры
-    for cam_index, cam_name in cameras:
-        t = threading.Thread(target=detect_fire_from_camera, args=(cam_index, cam_name, view_only))
+    # Запуск потока для каждой камеры (у каждого — свой индекс окна: Fire Detection 1, 2, 3 …)
+    for idx, (cam_index, cam_name) in enumerate(cameras, start=1):
+        t = threading.Thread(target=detect_fire_from_camera, args=(cam_index, cam_name, view_only, idx))
         t.start()
         threads.append(t)
 

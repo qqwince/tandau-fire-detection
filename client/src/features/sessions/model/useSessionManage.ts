@@ -88,12 +88,15 @@ export function useSessionManage(
         if (!showManageModal || !activeSessionId) return
         const refresh = () => {
             loadPendingRequests(activeSessionId)
-            loadManageData()
+            // Не обновлять список участников по таймеру на вкладке «Участники», чтобы не закрывался открытый select с ролями
+            if (manageTab !== 'members') {
+                loadManageData()
+            }
             loadSessions()
         }
         const interval = setInterval(refresh, 5000)
         return () => clearInterval(interval)
-    }, [showManageModal, activeSessionId, loadPendingRequests, loadManageData, loadSessions])
+    }, [showManageModal, activeSessionId, manageTab, loadPendingRequests, loadManageData, loadSessions])
 
     useEffect(() => {
         if (!showManageModal || manageTab !== 'code') {

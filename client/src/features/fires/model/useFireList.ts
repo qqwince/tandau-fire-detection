@@ -74,9 +74,16 @@ export function useFireList(
                     }
                     return merged
                 })
-                setApprovedSites(
-                    new Set(newList.filter((s) => s.approved).map((s) => String(s.id)))
-                )
+                // Инициализируем approvedSites по данным сервера только пока пользователь сам ещё ничего не выбрал.
+                // После первого ручного подтверждения не затираем локальное выделение при автообновлениях.
+                setApprovedSites((prev) => {
+                    if (prev.size > 0) return prev
+                    return new Set(
+                        newList
+                            .filter((s) => s.approved)
+                            .map((s) => String(s.id))
+                    )
+                })
                 setPagination((prev) => ({
                     ...prev,
                     totalPages: data.total_pages,
